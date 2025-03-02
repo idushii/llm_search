@@ -1,16 +1,28 @@
+"""
+Система интеллектуального поиска и обработки информации
+"""
 import os
 import sys
 import time
+import asyncio
 from datetime import datetime
-from planned import QueryPlanner
-from scraping import run_search
+
+from src.core.utils import logger, sanitize_filename, show_animation, print_progress
+from src.search.planned_topics import TopicPlanner
+from src.search.planned_searching import SearchQueryPlanner
+from src.search.scraping import run_search
+from src.processing.ranking_search_result import SearchResultRanker
+from src.processing.summarizer import DocumentSummarizer
+from src.processing.ranking_summary import SummaryRanker
+from src.processing.nlp_utils import AnswerGenerator
+from src.storage.cache_manager import CacheManager
 
 def print_header():
     """
     Выводит заголовок приложения в консоль
     """
     print("\n" + "=" * 80)
-    print("СЕРВИС ИТЕРАТИВНОГО ПОИСКА ИНФОРМАЦИИ".center(80))
+    print("СИСТЕМА ИНТЕЛЛЕКТУАЛЬНОГО ПОИСКА И ОБРАБОТКИ ИНФОРМАЦИИ".center(80))
     print("=" * 80 + "\n")
 
 def print_step(step_number, step_name):
@@ -44,152 +56,121 @@ def get_user_query():
         
         return query
 
-def generate_output_filename(query):
+def display_subtopics(subtopics):
     """
-    Генерирует имя файла для сохранения результатов
+    Выводит список подзапросов в консоль и позволяет пользователю отредактировать их
     
     Args:
-        query (str): Запрос пользователя
+        subtopics (list): Список сгенерированных подзапросов
         
     Returns:
-        str: Имя файла
+        list: Отредактированный список подзапросов
     """
-    # Генерируем имя файла на основе запроса и текущей даты/времени
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    sanitized_query = "".join(c if c.isalnum() else "_" for c in query)
-    sanitized_query = sanitized_query[:30]  # Ограничиваем длину
-    
-    return f"results_{sanitized_query}_{timestamp}.md"
-
-def display_topics(topics):
-    """
-    Выводит список тем в консоль и позволяет пользователю отредактировать их
-    
-    Args:
-        topics (list): Список сгенерированных тем
-        
-    Returns:
-        list: Отредактированный список тем
-    """
-    if not topics:
-        print("Не удалось сгенерировать темы для поиска.")
+    if not subtopics:
+        print("Не удалось сгенерировать подзапросы для поиска.")
         return []
     
-    print("\nСгенерированные темы для поиска:")
-    for i, topic in enumerate(topics, 1):
-        print(f"{i}. {topic}")
+    print("\nСгенерированные подзапросы для поиска:")
+    for i, subtopic in enumerate(subtopics, 1):
+        print(f"{i}. {subtopic}")
     
-    # Спрашиваем, хочет ли пользователь отредактировать темы
+    # Спрашиваем, хочет ли пользователь отредактировать подзапросы
     while True:
-        choice = input("\nХотите отредактировать темы (да/нет)? ").strip().lower()
+        choice = input("\nХотите отредактировать подзапросы (да/нет)? ").strip().lower()
         
         if choice in ["нет", "н", "no", "n"]:
-            return topics
+            return subtopics
         
         if choice in ["да", "д", "yes", "y"]:
-            edited_topics = edit_topics(topics)
-            return edited_topics
+            edited_subtopics = edit_subtopics(subtopics)
+            return edited_subtopics
         
         print("Пожалуйста, введите 'да' или 'нет'.")
 
-def edit_topics(topics):
+def edit_subtopics(subtopics):
     """
-    Позволяет пользователю отредактировать темы
+    Позволяет пользователю отредактировать подзапросы
     
     Args:
-        topics (list): Исходный список тем
+        subtopics (list): Исходный список подзапросов
         
     Returns:
-        list: Отредактированный список тем
+        list: Отредактированный список подзапросов
     """
-    edited_topics = topics.copy()
+    edited_subtopics = subtopics.copy()
     
     while True:
         print("\nВыберите действие:")
-        print("1. Удалить тему")
-        print("2. Добавить новую тему")
-        print("3. Редактировать существующую тему")
+        print("1. Удалить подзапрос")
+        print("2. Добавить новый подзапрос")
+        print("3. Редактировать существующий подзапрос")
         print("4. Закончить редактирование")
         
         choice = input("\nВаш выбор (1-4): ").strip()
         
         if choice == "1":
-            # Удаление темы
-            if not edited_topics:
-                print("Список тем пуст.")
+            # Удаление подзапроса
+            if not edited_subtopics:
+                print("Список подзапросов пуст.")
                 continue
             
-            for i, topic in enumerate(edited_topics, 1):
-                print(f"{i}. {topic}")
+            for i, subtopic in enumerate(edited_subtopics, 1):
+                print(f"{i}. {subtopic}")
             
-            idx = input("Введите номер темы для удаления: ").strip()
+            idx = input("Введите номер подзапроса для удаления: ").strip()
             try:
                 idx = int(idx)
-                if 1 <= idx <= len(edited_topics):
-                    removed = edited_topics.pop(idx - 1)
-                    print(f"Тема '{removed}' удалена.")
+                if 1 <= idx <= len(edited_subtopics):
+                    removed = edited_subtopics.pop(idx - 1)
+                    print(f"Подзапрос '{removed}' удален.")
                 else:
-                    print("Неверный номер темы.")
+                    print("Неверный номер подзапроса.")
             except ValueError:
                 print("Пожалуйста, введите число.")
         
         elif choice == "2":
-            # Добавление новой темы
-            new_topic = input("Введите новую тему: ").strip()
-            if new_topic:
-                edited_topics.append(new_topic)
-                print(f"Тема '{new_topic}' добавлена.")
+            # Добавление нового подзапроса
+            new_subtopic = input("Введите новый подзапрос: ").strip()
+            if new_subtopic:
+                edited_subtopics.append(new_subtopic)
+                print(f"Подзапрос '{new_subtopic}' добавлен.")
             else:
-                print("Тема не может быть пустой.")
+                print("Подзапрос не может быть пустым.")
         
         elif choice == "3":
-            # Редактирование существующей темы
-            if not edited_topics:
-                print("Список тем пуст.")
+            # Редактирование существующего подзапроса
+            if not edited_subtopics:
+                print("Список подзапросов пуст.")
                 continue
             
-            for i, topic in enumerate(edited_topics, 1):
-                print(f"{i}. {topic}")
+            for i, subtopic in enumerate(edited_subtopics, 1):
+                print(f"{i}. {subtopic}")
             
-            idx = input("Введите номер темы для редактирования: ").strip()
+            idx = input("Введите номер подзапроса для редактирования: ").strip()
             try:
                 idx = int(idx)
-                if 1 <= idx <= len(edited_topics):
-                    new_text = input(f"Введите новый текст для темы '{edited_topics[idx-1]}': ").strip()
+                if 1 <= idx <= len(edited_subtopics):
+                    new_text = input(f"Введите новый текст для подзапроса '{edited_subtopics[idx-1]}': ").strip()
                     if new_text:
-                        edited_topics[idx - 1] = new_text
-                        print(f"Тема обновлена на '{new_text}'.")
+                        edited_subtopics[idx - 1] = new_text
+                        print(f"Подзапрос обновлен на '{new_text}'.")
                     else:
-                        print("Тема не может быть пустой.")
+                        print("Подзапрос не может быть пустым.")
                 else:
-                    print("Неверный номер темы.")
+                    print("Неверный номер подзапроса.")
             except ValueError:
                 print("Пожалуйста, введите число.")
         
         elif choice == "4":
             # Завершение редактирования
-            if not edited_topics:
-                print("Предупреждение: список тем пуст. Поиск не будет выполнен.")
-            return edited_topics
+            if not edited_subtopics:
+                print("Предупреждение: список подзапросов пуст. Поиск не будет выполнен.")
+            return edited_subtopics
         
         else:
             print("Неверный выбор. Пожалуйста, выберите 1, 2, 3 или 4.")
 
-def show_searching_animation(duration=0.5):
-    """
-    Показывает анимацию во время поиска
-    
-    Args:
-        duration (float): Продолжительность каждого шага анимации в секундах
-    """
-    chars = ["|", "/", "-", "\\"]
-    for _ in range(3):
-        for char in chars:
-            sys.stdout.write(f"\rВыполняется поиск {char}")
-            sys.stdout.flush()
-            time.sleep(duration)
-
-def main():
+async def main():
     """
     Основная функция программы
     """
@@ -204,43 +185,112 @@ def main():
         print("Пример: export AITUNNEL_API_KEY=sk-aitunnel-xxx")
         return
     
+    # Создаем менеджер кэша
+    cache_manager = CacheManager()
+    
     while True:
         try:
             # Шаг 1: Получение запроса от пользователя
             print_step(1, "Ввод запроса")
             query = get_user_query()
             
-            # Шаг 2: Генерация тем для поиска
-            print_step(2, "Генерация тем для поиска")
-            planner = QueryPlanner()
-            topics = planner.generate_search_topics(query)
+            # Генерируем имя темы для кэширования
+            theme_name = cache_manager.generate_theme_name(query)
             
-            # Шаг 3: Отображение и редактирование тем
-            print_step(3, "Просмотр и редактирование тем")
-            final_topics = display_topics(topics)
+            # Шаг 2: Генерация подзапросов
+            print_step(2, "Генерация подзапросов")
+            topic_planner = TopicPlanner()
+            subtopics = topic_planner.generate_subtopics(query)
             
-            if not final_topics:
-                print("Список тем пуст. Поиск не будет выполнен.")
+            # Шаг 3: Отображение и редактирование подзапросов
+            print_step(3, "Просмотр и редактирование подзапросов")
+            final_subtopics = display_subtopics(subtopics)
+            
+            if not final_subtopics:
+                print("Список подзапросов пуст. Поиск не будет выполнен.")
                 continue
             
-            # Шаг 4: Выполнение поиска
-            print_step(4, "Выполнение поиска и обработка результатов")
-            output_file = generate_output_filename(query)
-            print(f"Начинаем поиск по {len(final_topics)} темам...")
+            # Сохраняем подзапросы в файл
+            subtopics_file = topic_planner.save_subtopics_to_file(final_subtopics, query, theme_name)
             
-            show_searching_animation()
+            # Шаг 4: Генерация поисковых запросов для каждого подзапроса
+            print_step(4, "Генерация поисковых запросов")
+            search_query_planner = SearchQueryPlanner()
             
-            # Выполняем поиск
-            topics_file, results_json, results_md = run_search(final_topics, query, output_file)
+            print("Генерация поисковых запросов для каждого подзапроса...")
+            search_queries_dict = search_query_planner.generate_all_search_queries(final_subtopics)
             
-            if topics_file and results_json:
-                print(f"\nПоиск завершен! Результаты сохранены:")
-                print(f"1. Список тем: {os.path.abspath(topics_file)}")
-                print(f"2. Результаты поиска (JSON): {os.path.abspath(results_json)}")
-                print(f"3. Результаты поиска (Markdown): {os.path.abspath(results_md)}")
-                print(f"4. Отдельные страницы сохранены в директории: {os.path.abspath('cache')}")
+            # Сохраняем поисковые запросы в файл
+            search_queries_file = search_query_planner.save_search_queries_to_file(search_queries_dict, theme_name)
+            
+            # Шаг 5: Выполнение поиска
+            print_step(5, "Выполнение поиска")
+            print(f"Выполняем поиск по {len(final_subtopics)} подзапросам...")
+            
+            # Анимация поиска
+            show_animation()
+            
+            # Выполняем поиск асинхронно
+            search_results = await run_search(search_queries_dict, theme_name)
+            
+            if not search_results:
+                print("Не удалось выполнить поиск. Пожалуйста, проверьте подключение к интернету и попробуйте снова.")
+                continue
+            
+            # Шаг 6: Ранжирование результатов поиска
+            print_step(6, "Ранжирование результатов поиска")
+            search_result_ranker = SearchResultRanker()
+            
+            # Обрабатываем результаты поиска: фильтруем дубликаты, ранжируем и выбираем топ-5
+            top_results = search_result_ranker.process_search_results(search_results, query)
+            
+            # Сохраняем отранжированные результаты
+            ranked_results_file = search_result_ranker.save_ranked_results_to_json(top_results, theme_name)
+            
+            print(f"Найдено и отранжировано {len(top_results)} результатов.")
+            
+            # Шаг 7: Саммаризация документов
+            print_step(7, "Саммаризация документов")
+            document_summarizer = DocumentSummarizer()
+            
+            print("Выполняем саммаризацию документов...")
+            documents_with_summaries = document_summarizer.process_documents(top_results, theme_name)
+            
+            # Шаг 8: Ранжирование саммари
+            print_step(8, "Ранжирование саммари")
+            summary_ranker = SummaryRanker()
+            
+            # Обрабатываем саммари: ранжируем и выбираем топ-5
+            top_summaries = summary_ranker.process_summaries(documents_with_summaries, query)
+            
+            # Сохраняем отранжированные саммари
+            ranked_summaries_file = summary_ranker.save_ranked_summaries_to_json(top_summaries, theme_name)
+            
+            print(f"Отранжировано {len(top_summaries)} саммари.")
+            
+            # Шаг 9: Генерация ответа
+            print_step(9, "Генерация ответа")
+            answer_generator = AnswerGenerator()
+            
+            print("Генерация структурированного ответа...")
+            answer = answer_generator.generate_answer(top_summaries, query)
+            
+            if answer:
+                # Сохраняем запрос и ответ в файлы
+                request_file = answer_generator.save_request_to_file(query, theme_name)
+                answer_file = answer_generator.save_answer_to_file(answer, query, theme_name)
+                
+                print("\nОтвет успешно сгенерирован!")
+                print(f"Ответ сохранен в файл: {answer_file}")
+                
+                # Выводим ответ в консоль
+                print("\n" + "=" * 80)
+                print("ОТВЕТ НА ЗАПРОС".center(80))
+                print("=" * 80 + "\n")
+                print(answer)
+                print("\n" + "=" * 80 + "\n")
             else:
-                print("\nПроизошла ошибка при выполнении поиска.")
+                print("Не удалось сгенерировать ответ.")
             
             # Спрашиваем, хочет ли пользователь продолжить работу с программой
             while True:
@@ -254,16 +304,15 @@ def main():
                     break
                 
                 print("Пожалуйста, введите 'да' или 'нет'.")
-            
+                
         except KeyboardInterrupt:
-            print("\nРабота программы прервана пользователем.")
+            print("\nПрограмма прервана пользователем.")
             return
-        
         except Exception as e:
-            print(f"\nПроизошла непредвиденная ошибка: {e}")
-            print("Программа будет перезапущена.")
-            continue
-
+            logger.error(f"Произошла ошибка: {e}")
+            print(f"\nПроизошла ошибка: {e}")
+            print("Пожалуйста, попробуйте снова.")
 
 if __name__ == "__main__":
-    main()
+    # Запуск основной функции с асинхронной поддержкой
+    asyncio.run(main())
