@@ -23,7 +23,7 @@ class TopicPlanner:
             "Authorization": f"Bearer {self.api_key}"
         }
     
-    def generate_subtopics(self, query):
+    def generate_subtopics(self, query, max_tokens=2000):
         """
         Генерирует список подзапросов для основного запроса
         
@@ -36,7 +36,7 @@ class TopicPlanner:
         try:
             payload = {
                 "model": AITUNNEL_MODEL,
-                "max_tokens": 2000,
+                "max_tokens": max_tokens,
                 "messages": [
                     {
                         "role": "system",

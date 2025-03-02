@@ -58,7 +58,7 @@ class DocumentSummarizer:
             logger.error(f"Ошибка при извлечении текста из HTML: {e}")
             return ""
     
-    def summarize_text(self, text, max_tokens=4000):
+    def summarize_text(self, text, max_tokens=8000):
         """
         Генерирует саммари для текста
         
@@ -78,7 +78,7 @@ class DocumentSummarizer:
             
             payload = {
                 "model": AITUNNEL_MODEL,
-                "max_tokens": 2000,
+                "max_tokens": max_tokens,
                 "messages": [
                     {
                         "role": "system",
