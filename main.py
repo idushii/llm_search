@@ -309,11 +309,30 @@ async def main():
             print_step(10, "Генерация итогового ответа")
             answer_generator = AnswerGenerator()
             
-            # Выбираем топ-5 наиболее релевантных саммари для генерации ответа
+            # Выбираем топ-5 наиболее релевантных саммари для определения источников
             top_summaries = ranked_summaries[:5]
             
-            print(f"Генерация ответа на основе {len(top_summaries)} наиболее релевантных саммари...")
-            answer = answer_generator.generate_answer(query, top_summaries, theme_name)
+            # Получаем полные тексты документов, соответствующие топ-5 саммари
+            print(f"Подготовка полных текстов {len(top_summaries)} наиболее релевантных документов...")
+            
+            # Находим полные документы, соответствующие топ-саммари
+            full_documents = []
+            for summary in top_summaries:
+                # Находим соответствующий полный документ из top_results_with_content
+                document_url = summary.get("url", "")
+                for doc in top_results_with_content:
+                    if doc.get("url", "") == document_url:
+                        full_doc = {
+                            "title": doc.get("title", ""),
+                            "url": doc.get("url", ""),
+                            "content": doc.get("content", ""),  # Полный текст документа
+                            "rating": summary.get("rating", 0)  # Рейтинг из саммари
+                        }
+                        full_documents.append(full_doc)
+                        break
+            
+            print(f"Генерация ответа на основе полных текстов {len(full_documents)} наиболее релевантных документов...")
+            answer = answer_generator.generate_answer(query, full_documents, theme_name)
             
             # Выводим итоговый ответ
             print("\n" + "=" * 80)

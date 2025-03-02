@@ -60,7 +60,6 @@ class SearchEngine:
             # Формируем параметры запроса
             params = {
                 "q": query,
-                "max_results": max_results,
                 "format": format
             }
             
@@ -71,8 +70,9 @@ class SearchEngine:
             async with session.get(link, auth=auth) as response:
                 if response.status == HTTP_OK:
                     result = await response.json()
-                    logger.info(f"Найдено {len(result['results'])} результатов для запроса: {query}")
-                    return result['results']
+                    result_wrap = result['results'][:max_results]
+                    logger.info(f"Найдено {len(result_wrap)} результатов для запроса: {query}")
+                    return result_wrap
                 else:
                     error_text = await response.text()
                     logger.error(f"Ошибка при поиске ({response.status}): {error_text}")

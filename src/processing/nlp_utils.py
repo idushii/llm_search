@@ -1,5 +1,5 @@
 """
-Модуль для генерации ответа на основе саммари
+Модуль для генерации ответа на основе полных текстов документов
 """
 import os
 import requests
@@ -12,7 +12,7 @@ from src.core.utils import logger, create_directory
 
 class AnswerGenerator:
     """
-    Класс для генерации структурированного ответа на основе саммари
+    Класс для генерации структурированного ответа на основе полных текстов документов
     """
     def __init__(self, api_key=None):
         self.api_key = api_key or AITUNNEL_API_KEY
@@ -24,39 +24,48 @@ class AnswerGenerator:
             "Authorization": f"Bearer {self.api_key}"
         }
     
-    def generate_answer(self, query, summaries, theme_name=None):
+    def generate_answer(self, query, documents, theme_name=None):
         """
-        Генерирует структурированный ответ на основе саммари
+        Генерирует структурированный ответ на основе полных текстов документов
         
         Args:
             query (str): Исходный запрос пользователя
-            summaries (list): Список отранжированных саммари
+            documents (list): Список документов с полными текстами
             theme_name (str, optional): Название темы для сохранения ответа
             
         Returns:
             str: Структурированный ответ
         """
         try:
-            # Формируем контекст из саммари
+            # Формируем контекст из полных текстов документов
             context = ""
             sources = []
             
-            print("Формирование контекста из саммари для генерации ответа...")
+            print("Формирование контекста из полных текстов документов для генерации ответа...")
             
-            for i, summary_doc in enumerate(summaries):
-                summary = summary_doc.get("summary", "")
-                title = summary_doc.get("title", f"Источник {i+1}")
-                url = summary_doc.get("url", "")
+            for i, doc in enumerate(documents):
+                content = doc.get("content", "")
+                title = doc.get("title", f"Источник {i+1}")
+                url = doc.get("url", "")
                 
-                if summary:
-                    context += f"\nИСТОЧНИК {i+1}:\nЗаголовок: {title}\nURL: {url}\n\n{summary}\n\n"
+                if content:
+                    # Для больших документов ограничиваем размер, чтобы не превышать лимиты API
+                    max_content_length = 500000  # Примерное ограничение
+                    if len(content) > max_content_length:
+                        # Обрезаем контент, сохраняя начало и конец
+                        half_length = max_content_length // 2
+                        truncated_content = content[:half_length] + "\n\n[...содержимое сокращено...]\n\n" + content[-half_length:]
+                        context += f"\nИСТОЧНИК {i+1}:\nЗаголовок: {title}\nURL: {url}\n\n{truncated_content}\n\n"
+                    else:
+                        context += f"\nИСТОЧНИК {i+1}:\nЗаголовок: {title}\nURL: {url}\n\n{content}\n\n"
+                    
                     sources.append(f"{i+1}. [{title}]({url})")
             
             # Формируем промпт для генерации ответа
             answer_prompt = f"""
             Ты – профессиональный аналитик, который создает структурированные, информативные ответы на основе предоставленных источников.
             
-            Твоя задача – составить исчерпывающий ответ на запрос пользователя, основываясь ТОЛЬКО на предоставленных саммари источников.
+            Твоя задача – составить исчерпывающий ответ на запрос пользователя, основываясь ТОЛЬКО на предоставленных полных текстах документов.
             
             ЗАПРОС ПОЛЬЗОВАТЕЛЯ:
             {query}
@@ -71,6 +80,7 @@ class AnswerGenerator:
             4. В конце предоставь список использованных источников в формате Markdown
             5. Убедись, что весь ответ использует Markdown для форматирования
             6. Сосредоточься только на фактах из предоставленных источников, не добавляй собственную информацию
+            7. Найди и проанализируй ключевые моменты из полных текстов документов
             
             ФОРМАТ ОТВЕТА:
             # Ответ на запрос: {query}
@@ -90,7 +100,7 @@ class AnswerGenerator:
             ...
             """
             
-            print("Генерация итогового ответа...")
+            print("Генерация итогового ответа на основе полных текстов документов...")
             
             # Ограничиваем частоту запросов к API
             time.sleep(1.0 / AITUNNEL_RPS)
