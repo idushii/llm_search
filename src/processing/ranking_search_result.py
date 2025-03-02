@@ -61,20 +61,35 @@ class SearchResultRanker:
         from src.core.config import AITUNNEL_API_KEY, AITUNNEL_MODEL, AITUNNEL_API_URL, AITUNNEL_RPS
         
         all_results = []
+        total_results = sum(len(results) for results in search_results.values())
+        processed_results = 0
                 
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {AITUNNEL_API_KEY}"
         }
         
+        print(f"\nНачинаю ранжирование {total_results} результатов поиска с использованием LLM...")
+        print("Оценка будет проводиться по 5 критериям от 0 до 10:")
+        print("1. Соответствие исходному запросу")
+        print("2. Соответствие направлению поиска (подзапросу)")
+        print("3. Полнота информации")
+        print("4. Точность данных")
+        print("5. Читабельность и структура")
+        
         # Обрабатываем результаты для каждого подзапроса
         for subtopic, results in search_results.items():
             logger.info(f"Ранжирование результатов для подзапроса: {subtopic}")
+            print(f"\nРанжирование результатов для подзапроса: {subtopic}")
             
             for result in results:
                 title = result.get("title", "")
                 snippet = result.get("snippet", "")
                 url = result.get("url", "")
+                
+                processed_results += 1
+                progress = (processed_results / total_results) * 100
+                print(f"[{processed_results}/{total_results}] ({progress:.1f}%) Оценка: {title[:50]}...", end="\r")
                 
                 # Формируем запрос для LLM
                 user_message = f"""
@@ -203,6 +218,9 @@ class SearchResultRanker:
         # Сортируем результаты по рейтингу (от большего к меньшему)
         sorted_results = sorted(all_results, key=lambda x: x["rank"], reverse=True)
         
+        print("\n\nРанжирование результатов завершено.")
+        print(f"Из {total_results} результатов поиска были оценены все.")
+        
         return sorted_results
     
     def select_top_results(self, ranked_results, top_n=5):
@@ -216,7 +234,19 @@ class SearchResultRanker:
         Returns:
             list: Список top_n наиболее релевантных результатов
         """
-        return ranked_results[:top_n]
+        # Выводим информацию о выбранных результатах
+        print(f"\nВыбраны топ-{top_n} наиболее релевантных результатов для дальнейшей обработки:")
+        
+        top_results = ranked_results[:top_n]
+        
+        for i, result in enumerate(top_results, 1):
+            title = result.get("title", "")
+            rank = result.get("rank", 0)
+            subtopic = result.get("subtopic", "")
+            
+            print(f"{i}. [{rank:.1f}] {title} (подзапрос: {subtopic})")
+        
+        return top_results
     
     def process_search_results(self, search_results, original_query, top_n=5):
         """
@@ -254,17 +284,18 @@ class SearchResultRanker:
             str: Путь к созданному файлу или None в случае ошибки
         """
         try:
-            # Создаем директорию для результатов ранжирования
+            # Создаем директорию для результатов поиска
             ranked_results_dir = os.path.join(cache_dir, "ranked_results")
             os.makedirs(ranked_results_dir, exist_ok=True)
             
-            # Генерируем имя файла
+            # Формируем имя файла
             file_path = os.path.join(ranked_results_dir, f"{theme_name}.json")
             
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(ranked_results, f, ensure_ascii=False, indent=2)
+            # Сохраняем данные в JSON формате с красивым форматированием
+            with open(file_path, "w", encoding="utf-8") as file:
+                json.dump(ranked_results, file, ensure_ascii=False, indent=4)
             
-            logger.info(f"Отранжированные результаты сохранены в файл: {file_path}")
+            logger.info(f"Отранжированные результаты сохранены в {file_path}")
             return file_path
         except Exception as e:
             logger.error(f"Ошибка при сохранении отранжированных результатов: {e}")

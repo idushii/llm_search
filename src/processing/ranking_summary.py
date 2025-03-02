@@ -58,19 +58,25 @@ class SummaryRanker:
         from src.core.config import AITUNNEL_API_KEY, AITUNNEL_MODEL, AITUNNEL_API_URL, AITUNNEL_RPS
         
         ranked_summaries = []
+        total_summaries = len(summaries)
+        processed_summaries = 0
         
-       
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {AITUNNEL_API_KEY}"
         }
         
-        logger.info(f"Ранжирование саммари для запроса: {original_query}")
+        logger.info(f"Ранжирование {total_summaries} саммари для запроса: {original_query}")
+        print(f"Ранжирование {total_summaries} саммари...")
         
         for summary_doc in summaries:
             summary_text = summary_doc.get("summary", "")
             title = summary_doc.get("title", "")
             url = summary_doc.get("url", "")
+            
+            processed_summaries += 1
+            progress = (processed_summaries / total_summaries) * 100
+            print(f"[{processed_summaries}/{total_summaries}] ({progress:.1f}%) Оценка: {title[:50]}...", end="\r")
             
             # Если саммари нет, пропускаем документ
             if not summary_text:
@@ -198,6 +204,8 @@ class SummaryRanker:
         # Сортируем саммари по рейтингу (от большего к меньшему)
         sorted_summaries = sorted(ranked_summaries, key=lambda x: x["rank"], reverse=True)
         
+        print("\n\nРанжирование саммари завершено.")
+        
         return sorted_summaries
     
     def select_top_summaries(self, ranked_summaries, top_n=5):
@@ -211,7 +219,18 @@ class SummaryRanker:
         Returns:
             list: Список top_n наиболее релевантных саммари
         """
-        return ranked_summaries[:top_n]
+        # Выводим информацию о выбранных саммари
+        print(f"\nВыбраны топ-{top_n} наиболее релевантных саммари для генерации ответа:")
+        
+        top_summaries = ranked_summaries[:top_n]
+        
+        for i, summary in enumerate(top_summaries, 1):
+            title = summary.get("title", "")
+            rank = summary.get("rank", 0)
+            
+            print(f"{i}. [{rank:.1f}] {title}")
+        
+        return top_summaries
     
     def process_summaries(self, documents_with_summaries, original_query, top_n=5):
         """
@@ -236,6 +255,37 @@ class SummaryRanker:
         
         return top_summaries
     
+    def rank_summaries(self, summaries, original_query, theme_name, top_n=5):
+        """
+        Комплексный метод для ранжирования саммари: ранжирует, выбирает топ и сохраняет результаты
+        
+        Args:
+            summaries (list): Список саммари
+            original_query (str): Исходный запрос пользователя
+            theme_name (str): Название темы для кэширования
+            top_n (int): Количество саммари для выбора
+            
+        Returns:
+            list: Список отсортированных саммари с рейтингом
+        """
+        # Фильтруем документы без саммари
+        valid_summaries = [doc for doc in summaries if "summary" in doc and doc["summary"]]
+        
+        if not valid_summaries:
+            print("Нет действительных саммари для ранжирования.")
+            return []
+        
+        # Ранжируем саммари
+        ranked_summaries = self.rank_by_keywords(valid_summaries, original_query)
+        
+        # Выбираем топ N саммари
+        top_summaries = self.select_top_summaries(ranked_summaries, top_n)
+        
+        # Сохраняем отранжированные саммари
+        self.save_ranked_summaries_to_json(ranked_summaries, theme_name)
+        
+        return ranked_summaries
+    
     def save_ranked_summaries_to_json(self, ranked_summaries, theme_name, cache_dir="cache"):
         """
         Сохраняет отранжированные саммари в JSON файл
@@ -249,15 +299,32 @@ class SummaryRanker:
             str: Путь к созданному файлу или None в случае ошибки
         """
         try:
-            # Создаем директорию для отранжированных саммари
+            # Создаем директорию для результатов ранжирования
             ranked_summaries_dir = os.path.join(cache_dir, "ranked_summaries")
             os.makedirs(ranked_summaries_dir, exist_ok=True)
             
-            # Генерируем имя файла
+            # Формируем имя файла
             file_path = os.path.join(ranked_summaries_dir, f"{theme_name}.json")
             
+            # Подготавливаем данные для сохранения
+            serializable_summaries = []
+            
+            for summary in ranked_summaries:
+                # Создаем копию саммари без больших полей
+                serializable_summary = {}
+                for key, value in summary.items():
+                    # Ограничиваем размер полей summary и content для сохранения в JSON
+                    if key == "summary" or key == "content":
+                        # Сохраняем только первые 500 символов
+                        serializable_summary[f"{key}_preview"] = value[:500] if value else ""
+                    else:
+                        serializable_summary[key] = value
+                
+                serializable_summaries.append(serializable_summary)
+            
+            # Сохраняем данные в JSON формате
             with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(ranked_summaries, f, ensure_ascii=False, indent=2)
+                json.dump(serializable_summaries, f, ensure_ascii=False, indent=4)
             
             logger.info(f"Отранжированные саммари сохранены в файл: {file_path}")
             return file_path

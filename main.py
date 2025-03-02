@@ -10,7 +10,7 @@ from datetime import datetime
 from src.core.utils import logger, sanitize_filename, show_animation, print_progress
 from src.search.planned_topics import TopicPlanner
 from src.search.planned_searching import SearchQueryPlanner
-from src.search.scraping import run_search
+from src.search.scraping import run_search, scrape_top_ranked_results
 from src.processing.ranking_search_result import SearchResultRanker
 from src.processing.summarizer import DocumentSummarizer
 from src.processing.ranking_summary import SummaryRanker
@@ -236,7 +236,7 @@ async def main():
             # Анимация поиска
             show_animation()
             
-            # Выполняем поиск асинхронно
+            # Выполняем поиск асинхронно (на этом этапе только получаем результаты поиска без скрапинга)
             search_results = await run_search(search_queries_dict, theme_name)
             
             if not search_results:
@@ -249,28 +249,50 @@ async def main():
             
             print("Оценка результатов поиска по 5 критериям с помощью языковой модели:")
             print("1. Соответствие исходному запросу")
-            print("2. Соответствие направлению поиска")
+            print("2. Соответствие направлению поиска (подзапросу)")
             print("3. Полнота информации")
-            print("4. Точность информации")
+            print("4. Точность данных")
             print("5. Читабельность и структура")
             
-            # Обрабатываем результаты поиска: фильтруем дубликаты, ранжируем и выбираем топ-5
-            top_results = search_result_ranker.process_search_results(search_results, query)
+            # Ранжируем результаты поиска
+            ranked_results = search_result_ranker.process_search_results(search_results, query)
             
             # Сохраняем отранжированные результаты
-            ranked_results_file = search_result_ranker.save_ranked_results_to_json(top_results, theme_name)
+            ranked_results_file = search_result_ranker.save_ranked_results_to_json(ranked_results, theme_name)
             
-            print(f"Найдено и отранжировано {len(top_results)} результатов.")
+            # Шаг 7: Скрапинг содержимого топ-5 страниц
+            print_step(7, "Скрапинг содержимого топ-5 страниц")
+            print("Скрапинг содержимого только для 5 наиболее релевантных результатов...")
             
-            # Шаг 7: Саммаризация документов
-            print_step(7, "Саммаризация документов")
-            print("Создание саммари для найденных документов...")
+            # Выполняем скрапинг только для топ-5 отранжированных результатов
+            top_results_with_content = await scrape_top_ranked_results(ranked_results[:5], theme_name)
             
-            summarizer = DocumentSummarizer()
-            documents_with_summaries = summarizer.process_documents(top_results, theme_name)
+            if not top_results_with_content:
+                print("Не удалось получить содержимое страниц. Проверьте подключение к интернету и попробуйте снова.")
+                continue
             
-            # Шаг 8: Ранжирование саммари с использованием LLM
-            print_step(8, "Ранжирование саммари с помощью языковой модели")
+            # Шаг 8: Саммаризация документов
+            print_step(8, "Саммаризация документов")
+            document_summarizer = DocumentSummarizer()
+            
+            summaries = []
+            
+            print(f"Создание саммари для {len(top_results_with_content)} документов...")
+            for i, result in enumerate(top_results_with_content, 1):
+                title = result.get("title", "")
+                content = result.get("content", "")
+                url = result.get("url", "")
+                
+                print(f"[{i}/{len(top_results_with_content)}] Саммаризация: {title[:50]}...", end="\r")
+                
+                summary = document_summarizer.create_summary(content, title, url, query, theme_name)
+                if summary:
+                    summaries.append(summary)
+            
+            print(f"\nСоздано {len(summaries)} саммари.")
+            
+            # Шаг 9: Ранжирование саммари
+            print_step(9, "Ранжирование саммари")
             summary_ranker = SummaryRanker()
             
             print("Оценка саммари по 5 критериям с помощью языковой модели:")
@@ -280,46 +302,45 @@ async def main():
             print("4. Информативность")
             print("5. Читабельность и структура")
             
-            top_summaries = summary_ranker.process_summaries(documents_with_summaries, query)
+            # Ранжируем саммари
+            ranked_summaries = summary_ranker.rank_summaries(summaries, query, theme_name)
             
-            # Сохраняем отранжированные саммари
-            ranked_summaries_file = summary_ranker.save_ranked_summaries_to_json(top_summaries, theme_name)
-            
-            print(f"Отранжировано {len(top_summaries)} саммари.")
-            
-            # Шаг 9: Генерация итогового ответа
-            print_step(9, "Генерация итогового ответа")
-            print("Формирование структурированного ответа на основе лучших саммари...")
-            
+            # Шаг 10: Генерация итогового ответа
+            print_step(10, "Генерация итогового ответа")
             answer_generator = AnswerGenerator()
-            answer = answer_generator.generate_answer(query, top_summaries)
             
-            # Сохраняем ответ в файл
-            answer_file = os.path.join("cache", f"{theme_name}_answer.md")
+            # Выбираем топ-5 наиболее релевантных саммари для генерации ответа
+            top_summaries = ranked_summaries[:5]
             
-            with open(answer_file, "w", encoding="utf-8") as f:
-                f.write(answer)
+            print(f"Генерация ответа на основе {len(top_summaries)} наиболее релевантных саммари...")
+            answer = answer_generator.generate_answer(query, top_summaries, theme_name)
             
-            print(f"\nОтвет сохранен в файл: {answer_file}")
+            # Выводим итоговый ответ
+            print("\n" + "=" * 80)
+            print("ИТОГОВЫЙ ОТВЕТ:".center(80))
+            print("=" * 80 + "\n")
             
-            # Шаг 10: Отображение ответа
-            print_step(10, "Итоговый ответ")
-            print("\n" + answer)
+            print(answer)
             
-            # Предлагаем пользователю ввести новый запрос
-            print("\nНажмите Enter для ввода нового запроса...")
-            input()
+            # Спрашиваем пользователя о дальнейших действиях
+            print("\n" + "=" * 80)
+            input("\nНажмите Enter для продолжения...")
             
         except KeyboardInterrupt:
-            print("\n\nПрограмма прервана пользователем.")
+            print("\n\nРабота программы прервана пользователем.")
             break
         except Exception as e:
             logger.error(f"Произошла ошибка: {e}")
             print(f"\nПроизошла ошибка: {e}")
-            print("Пожалуйста, попробуйте снова.")
-            import traceback
-            logger.error(traceback.format_exc())
+            print("Пожалуйста, попробуйте снова или проверьте логи для получения дополнительной информации.")
+            input("\nНажмите Enter для продолжения...")
 
 if __name__ == "__main__":
-    # Запуск основной функции с асинхронной поддержкой
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n\nРабота программы прервана пользователем.")
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}")
+        print(f"\nКритическая ошибка: {e}")
+        print("Пожалуйста, проверьте логи для получения дополнительной информации.")

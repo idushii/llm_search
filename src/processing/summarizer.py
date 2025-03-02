@@ -6,8 +6,9 @@ import requests
 import json
 from bs4 import BeautifulSoup
 import re
+import time
 
-from src.core.config import AITUNNEL_API_KEY, AITUNNEL_MODEL, AITUNNEL_API_URL, SUMMARIZATION_PROMPT, SUMMARIES_DIR
+from src.core.config import AITUNNEL_API_KEY, AITUNNEL_MODEL, AITUNNEL_API_URL, AITUNNEL_RPS, SUMMARIZATION_PROMPT, SUMMARIES_DIR
 from src.core.utils import logger, generate_hash, create_directory, count_words
 
 class DocumentSummarizer:
@@ -72,6 +73,9 @@ class DocumentSummarizer:
             # Ограничиваем размер текста для API (примерно 1 токен = 4 символа)
             text = text[:max_tokens * 4]
             
+            # Ограничиваем частоту запросов к API
+            time.sleep(1.0 / AITUNNEL_RPS)
+            
             payload = {
                 "model": AITUNNEL_MODEL,
                 "max_tokens": 2000,
@@ -101,6 +105,68 @@ class DocumentSummarizer:
                 
         except Exception as e:
             logger.error(f"Произошла ошибка при генерации саммари: {e}")
+            return None
+    
+    def create_summary(self, content, title, url, original_query, theme_name):
+        """
+        Создает и сохраняет саммари для документа
+        
+        Args:
+            content (str): Содержимое документа
+            title (str): Заголовок документа
+            url (str): URL документа
+            original_query (str): Исходный запрос пользователя
+            theme_name (str): Название темы для кэширования
+            
+        Returns:
+            dict: Документ с саммари или None в случае ошибки
+        """
+        try:
+            # Проверяем, есть ли у нас уже саммари для этого URL
+            url_hash = generate_hash(url)
+            summary_path = os.path.join(SUMMARIES_DIR, theme_name, f"{url_hash}.md")
+            
+            # Если саммари уже существует, загружаем его
+            if os.path.exists(summary_path):
+                logger.info(f"Загрузка существующего саммари для: {url}")
+                with open(summary_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    # Извлекаем саммари из файла
+                    summary_match = re.search(r"## Саммари\n\n(.*)", content, re.DOTALL)
+                    if summary_match:
+                        summary = summary_match.group(1)
+                        return {
+                            "title": title,
+                            "url": url,
+                            "summary": summary,
+                            "query": original_query
+                        }
+            
+            # Иначе создаем новое саммари
+            logger.info(f"Создание нового саммари для: {title}")
+            
+            # Генерируем саммари
+            summary = self.summarize_text(content)
+            
+            if not summary:
+                logger.error(f"Не удалось создать саммари для: {url}")
+                return None
+            
+            # Создаем документ с саммари
+            document = {
+                "title": title,
+                "url": url,
+                "summary": summary,
+                "query": original_query
+            }
+            
+            # Сохраняем саммари в файл
+            self.save_summary_to_file(document, theme_name)
+            
+            return document
+            
+        except Exception as e:
+            logger.error(f"Ошибка при создании саммари: {e}")
             return None
     
     def summarize_document(self, document):

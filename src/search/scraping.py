@@ -214,25 +214,51 @@ class SearchEngine:
                     # Выполняем поиск
                     search_results = await self.search_topic(query, session, max_results=max_results_per_query, format=format)
                     
-                    # Ограничиваем количество страниц для загрузки
-                    pages_to_download = search_results[:max_pages_per_query]
-                    
-                    # Загружаем страницы
-                    for result in pages_to_download:
-                        url = result.get("url")
-                        if url:
-                            # Получаем содержимое страницы
-                            content = await self.fetch_page_content(url, session)
-                            
-                            if content:
-                                # Добавляем содержимое к результату
-                                result["content"] = content
-                                subtopic_results.append(result)
+                    # На этом этапе мы только собираем результаты поиска без скрапинга
+                    # Скрапинг будет выполнен позже только для топ-5 отранжированных результатов
+                    for result in search_results:
+                        subtopic_results.append(result)
                 
                 # Сохраняем результаты для подзапроса
                 results[subtopic] = subtopic_results
         
         return results
+    
+    async def scrape_ranked_results(self, ranked_results):
+        """
+        Скрапит содержимое страниц для отранжированных результатов поиска
+        
+        Args:
+            ranked_results (list): Список отранжированных результатов поиска
+            
+        Returns:
+            list: Список отранжированных результатов с добавленным содержимым
+        """
+        print(f"\nПолучение содержимого для {len(ranked_results)} лучших результатов...")
+        
+        results_with_content = []
+        
+        async with aiohttp.ClientSession() as session:
+            for i, result in enumerate(ranked_results, 1):
+                url = result.get("url")
+                title = result.get("title", "")
+                
+                if url:
+                    print(f"[{i}/{len(ranked_results)}] Загрузка страницы: {title[:50]}...", end="\r")
+                    
+                    # Получаем содержимое страницы
+                    content = await self.fetch_page_content(url, session)
+                    
+                    if content:
+                        # Добавляем содержимое к результату
+                        result_with_content = result.copy()
+                        result_with_content["content"] = content
+                        results_with_content.append(result_with_content)
+                    else:
+                        logger.warning(f"Не удалось получить содержимое для URL: {url}")
+        
+        print(f"\nПолучено содержимое для {len(results_with_content)} из {len(ranked_results)} результатов.")
+        return results_with_content
         
     def save_search_results_to_json(self, results, theme_name, cache_dir="cache"):
         """
@@ -249,47 +275,131 @@ class SearchEngine:
         try:
             # Создаем директорию для результатов поиска
             search_results_dir = os.path.join(cache_dir, "search_results")
-            create_directory(search_results_dir)
+            os.makedirs(search_results_dir, exist_ok=True)
             
-            # Генерируем имя файла
+            # Формируем имя файла
             file_path = os.path.join(search_results_dir, f"{theme_name}.json")
             
-            # Подготавливаем результаты для сохранения
-            # Исключаем полное содержимое страниц, чтобы не делать файл слишком большим
-            simplified_results = {}
-            for subtopic, subtopic_results in results.items():
-                simplified_subtopic_results = []
-                for result in subtopic_results:
-                    # Копируем результат без содержимого страницы
-                    simplified_result = result.copy()
-                    if "content" in simplified_result:
-                        # Сохраняем только первые 500 символов содержимого для предварительного просмотра
-                        simplified_result["content_preview"] = simplified_result["content"][:500]
-                        del simplified_result["content"]
-                    simplified_subtopic_results.append(simplified_result)
-                simplified_results[subtopic] = simplified_subtopic_results
+            # Подготавливаем данные для сохранения - удаляем большие поля
+            filtered_results = {}
             
+            for subtopic, subtopic_results in results.items():
+                filtered_subtopic_results = []
+                
+                for result in subtopic_results:
+                    # Создаем копию результата без контента
+                    filtered_result = {k: v for k, v in result.items() if k != "content"}
+                    filtered_subtopic_results.append(filtered_result)
+                
+                filtered_results[subtopic] = filtered_subtopic_results
+            
+            # Сохраняем данные в JSON формате
             with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(simplified_results, f, ensure_ascii=False, indent=2)
+                json.dump(filtered_results, f, ensure_ascii=False, indent=4)
             
             logger.info(f"Результаты поиска сохранены в файл: {file_path}")
             return file_path
         except Exception as e:
             logger.error(f"Ошибка при сохранении результатов поиска: {e}")
             return None
+    
+    def save_scraped_content(self, ranked_results_with_content, theme_name, cache_dir="cache"):
+        """
+        Сохраняет скрапленное содержимое страниц в отдельные файлы
+        
+        Args:
+            ranked_results_with_content (list): Список отранжированных результатов с содержимым
+            theme_name (str): Название темы (для имени директории)
+            cache_dir (str): Директория кэша
+            
+        Returns:
+            bool: True, если сохранение прошло успешно, иначе False
+        """
+        try:
+            # Создаем директорию для документов по теме
+            theme_docs_dir = os.path.join(DOCS_DIR, theme_name)
+            os.makedirs(theme_docs_dir, exist_ok=True)
+            
+            saved_count = 0
+            
+            for result in ranked_results_with_content:
+                url = result.get("url", "")
+                title = result.get("title", "")
+                content = result.get("content", "")
+                
+                if url and content:
+                    # Генерируем хеш URL для имени файла
+                    url_hash = generate_hash(url)
+                    
+                    # Формируем имя файла
+                    file_name = f"{url_hash}.md"
+                    file_path = os.path.join(theme_docs_dir, file_name)
+                    
+                    # Добавляем метаинформацию в начало документа
+                    metadata = f"""---
+title: {title}
+url: {url}
+date: {time.strftime("%Y-%m-%d %H:%M:%S")}
+---
+
+"""
+                    
+                    # Сохраняем содержимое с метаданными
+                    with open(file_path, "w", encoding="utf-8", errors="ignore") as f:
+                        f.write(metadata + content)
+                    
+                    saved_count += 1
+            
+            logger.info(f"Сохранено {saved_count} документов по теме '{theme_name}' в {theme_docs_dir}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении скрапленного содержимого: {e}")
+            return False
+
 
 async def run_search(search_queries_dict, theme_name):
     """
-    Запускает процесс поиска по поисковым запросам
+    Выполняет поиск и обработку результатов
     
     Args:
         search_queries_dict (dict): Словарь с подзапросами и поисковыми запросами
-        theme_name (str): Название темы
+        theme_name (str): Название темы для кэширования
         
     Returns:
         dict: Словарь с результатами поиска
     """
     search_engine = SearchEngine()
-    results = await search_engine.process_search_queries(search_queries_dict)
-    search_engine.save_search_results_to_json(results, theme_name)
-    return results 
+    
+    # Выполняем поиск по всем запросам и получаем результаты
+    search_results = await search_engine.process_search_queries(
+        search_queries_dict,
+        max_results_per_query=10,
+        max_pages_per_query=5
+    )
+    
+    # Сохраняем результаты поиска в JSON
+    search_engine.save_search_results_to_json(search_results, theme_name)
+    
+    return search_results
+
+
+async def scrape_top_ranked_results(ranked_results, theme_name):
+    """
+    Скрапит и сохраняет содержимое страниц для топ отранжированных результатов
+    
+    Args:
+        ranked_results (list): Список отранжированных результатов
+        theme_name (str): Название темы для кэширования
+        
+    Returns:
+        list: Список отранжированных результатов с добавленным содержимым
+    """
+    search_engine = SearchEngine()
+    
+    # Скрапим содержимое для отранжированных результатов
+    ranked_results_with_content = await search_engine.scrape_ranked_results(ranked_results)
+    
+    # Сохраняем скрапленное содержимое
+    search_engine.save_scraped_content(ranked_results_with_content, theme_name)
+    
+    return ranked_results_with_content 

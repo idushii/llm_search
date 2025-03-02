@@ -4,8 +4,9 @@
 import os
 import requests
 import json
+import time
 
-from src.core.config import AITUNNEL_API_KEY, AITUNNEL_MODEL, AITUNNEL_API_URL
+from src.core.config import AITUNNEL_API_KEY, AITUNNEL_MODEL, AITUNNEL_API_URL, AITUNNEL_RPS
 from src.core.constants import ANSWER_FILE
 from src.core.utils import logger, create_directory
 
@@ -23,13 +24,14 @@ class AnswerGenerator:
             "Authorization": f"Bearer {self.api_key}"
         }
     
-    def generate_answer(self, query, summaries):
+    def generate_answer(self, query, summaries, theme_name=None):
         """
         Генерирует структурированный ответ на основе саммари
         
         Args:
             query (str): Исходный запрос пользователя
             summaries (list): Список отранжированных саммари
+            theme_name (str, optional): Название темы для сохранения ответа
             
         Returns:
             str: Структурированный ответ
@@ -38,6 +40,8 @@ class AnswerGenerator:
             # Формируем контекст из саммари
             context = ""
             sources = []
+            
+            print("Формирование контекста из саммари для генерации ответа...")
             
             for i, summary_doc in enumerate(summaries):
                 summary = summary_doc.get("summary", "")
@@ -86,10 +90,10 @@ class AnswerGenerator:
             ...
             """
             
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {AITUNNEL_API_KEY}"
-            }
+            print("Генерация итогового ответа...")
+            
+            # Ограничиваем частоту запросов к API
+            time.sleep(1.0 / AITUNNEL_RPS)
             
             payload = {
                 "model": AITUNNEL_MODEL,
@@ -102,7 +106,7 @@ class AnswerGenerator:
             }
             
             # Выполняем запрос к LLM API
-            response = requests.post(AITUNNEL_API_URL, headers=headers, json=payload)
+            response = requests.post(AITUNNEL_API_URL, headers=self.headers, json=payload)
             
             if response.status_code == 200:
                 llm_response = response.json()
@@ -113,6 +117,13 @@ class AnswerGenerator:
                     answer += "\n\n## Использованные источники\n"
                     for source in sources:
                         answer += f"- {source}\n"
+                
+                print("Ответ успешно сгенерирован!")
+                
+                # Если указано имя темы, сохраняем ответ и запрос
+                if theme_name:
+                    self.save_answer_to_file(answer, query, theme_name)
+                    self.save_request_to_file(query, theme_name)
                 
                 return answer
             else:
