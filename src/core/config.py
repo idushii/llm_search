@@ -10,10 +10,6 @@ AITUNNEL_MODEL = os.getenv("AITUNNEL_MODEL")
 SEARCHXNG_BASIC_AUTH_LOGIN = os.getenv("SEARCHXNG_BASIC_AUTH_LOGIN")
 SEARCHXNG_BASIC_AUTH_PASSWORD = os.getenv("SEARCHXNG_BASIC_AUTH_PASSWORD")
 
-# Настройки планирования запросов
-COUNT_RU_TOPICS = os.getenv("COUNT_RU_TOPICS", "3-5")
-COUNT_EN_TOPICS = os.getenv("COUNT_EN_TOPICS", "5-7")
-
 # Настройки лимитов запросов
 SEARCHXNG_RPM = int(os.getenv("LIMIT_SEARCHXNG_RPM", "10"))  # Запросов в минуту
 SEARCHXNG_INTERVAL = 60.0 / SEARCHXNG_RPM  # Интервал между запросами в секундах
@@ -21,18 +17,18 @@ JINA_RPS = float(os.getenv("LIMIT_JINA_RPS", "5"))  # Запросов в сек
 AITUNNEL_RPS = float(os.getenv("LIMIT_AITUNNEL_RPS", "2"))  # Запросов в секунду
 
 # Настройки путей
-CACHE_DIR = os.path.join(os.getcwd(), "cache")
-DOCS_DIR = os.path.join(CACHE_DIR, "docs")
-SUMMARIES_DIR = os.path.join(CACHE_DIR, "summaries")
+CACHE_DIR = os.path.join(os.getcwd(), os.getenv("CACHE_DIR", "cache"))
+DOCS_DIR = os.path.join(CACHE_DIR, os.getenv("DOCS_DIR", "docs"))
+SUMMARIES_DIR = os.path.join(CACHE_DIR, os.getenv("SUMMARIES_DIR", "summaries"))
 
 # Настройки запросов
-MAX_RESULTS_PER_QUERY = 5
-MAX_SUMMARIES_FOR_ANSWER = 5
+MAX_RESULTS_PER_QUERY = os.getenv("MAX_RESULTS_PER_QUERY", "5")
+MAX_SUMMARIES_FOR_ANSWER = os.getenv("MAX_SUMMARIES_FOR_ANSWER", "5")
 
 # URL для API
-AITUNNEL_API_URL = "https://api.aitunnel.ru/v1/chat/completions"
-SEARCHXNG_API_URL = "https://searchxng.ai/search"
-JINA_API_URL = "https://api.jina.ai/v1/chat/completions"
+AITUNNEL_API_URL = os.getenv("AITUNNEL_API_URL", "https://api.aitunnel.ru/v1/chat/completions") 
+SEARCHXNG_API_URL = os.getenv("SEARCHXNG_API_URL", "https://searchxng.ai/search")
+JINA_API_URL = os.getenv("JINA_API_URL", "https://api.jina.ai/v1/chat/completions")
 
 # Промпты для генерации запросов
 SUBTOPICS_PROMPT = """
@@ -86,3 +82,60 @@ SUMMARIZATION_PROMPT = """
 
 Если текст сложный или запутанный, сначала разбери его на ключевые смысловые блоки, а затем составь summary.
 """ 
+
+RANKING_SUMMARY_PROMPT = """
+Ты – профессиональный эксперт по оценке качества и релевантности саммари документов.
+Твоя задача – оценить релевантность саммари относительно исходного запроса по 5 критериям:
+
+1. Соответствие исходному запросу (0-10): насколько саммари отвечает на поставленный вопрос
+2. Полнота информации (0-10): охватывает ли саммари ключевые аспекты темы
+3. Точность информации (0-10): содержит ли саммари корректные и актуальные данные
+4. Информативность (0-10): сколько полезной информации содержится в саммари
+5. Читабельность и структура (0-10): насколько саммари логично организовано
+
+Оцени следующее саммари по указанным критериям и дай оценку по шкале от 0 до 10 для каждого критерия.
+В конце рассчитай общий рейтинг как среднее арифметическое по всем критериям.
+
+Возвращай ответ в следующем формате:
+```json
+{
+    "соответствие_запросу": N,
+    "полнота": N,
+    "точность": N,
+    "информативность": N,
+    "структура": N,
+    "итоговый_рейтинг": N
+}
+```
+
+Где N - оценка от 0 до 10. Используй только числа, без объяснений."""
+
+
+
+RANKING_SEARCH_RESULT_PROMPT = """
+Ты – профессиональный эксперт по оценке качества и релевантности результатов поиска.
+Твоя задача – оценить релевантность документа относительно исходного запроса по 5 критериям:
+
+1. Соответствие исходному запросу (0-10): насколько документ отвечает на поставленный вопрос
+2. Соответствие направлению поиска (0-10): насколько документ соответствует текущему подзапросу
+3. Полнота информации (0-10): охватывает ли документ ключевые аспекты темы
+4. Точность (0-10): содержит ли документ корректные и актуальные данные
+5. Читабельность и структура (0-10): насколько текст логично организован
+
+Оцени следующий результат поиска по указанным критериям и дай оценку по шкале от 0 до 10 для каждого критерия.
+В конце рассчитай общий рейтинг как среднее арифметическое по всем критериям.
+
+Возвращай ответ в следующем формате:
+```json
+{
+    "соответствие_запросу": N,
+    "соответствие_направлению": N,
+    "полнота": N,
+    "точность": N,
+    "структура": N,
+    "итоговый_рейтинг": N
+}
+```
+
+Где N - оценка от 0 до 10. Используй только числа, без объяснений.
+"""

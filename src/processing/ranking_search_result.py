@@ -5,6 +5,7 @@ import json
 import os
 from collections import Counter
 
+from src.core.config import RANKING_SEARCH_RESULT_PROMPT
 from src.core.utils import logger
 
 class SearchResultRanker:
@@ -46,7 +47,7 @@ class SearchResultRanker:
     
     def rank_by_relevance(self, search_results, original_query):
         """
-        Ранжирует результаты поиска по релевантности к исходному запросу
+        Ранжирует результаты поиска по релевантности к исходному запросу, используя LLM
         
         Args:
             search_results (dict): Словарь с результатами поиска
@@ -55,45 +56,149 @@ class SearchResultRanker:
         Returns:
             list: Список отсортированных результатов с рейтингом
         """
-        # Разбиваем запрос на ключевые слова для анализа
-        query_words = set(original_query.lower().split())
+        import requests
+        import time
+        from src.core.config import AITUNNEL_API_KEY, AITUNNEL_MODEL, AITUNNEL_API_URL, AITUNNEL_RPS
         
         all_results = []
+                
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {AITUNNEL_API_KEY}"
+        }
         
         # Обрабатываем результаты для каждого подзапроса
         for subtopic, results in search_results.items():
+            logger.info(f"Ранжирование результатов для подзапроса: {subtopic}")
+            
             for result in results:
-                # Расчет рейтинга на основе текста сниппета и заголовка
-                title = result.get("title", "").lower()
-                snippet = result.get("snippet", "").lower()
+                title = result.get("title", "")
+                snippet = result.get("snippet", "")
+                url = result.get("url", "")
                 
-                # Считаем вхождения ключевых слов из запроса
-                title_score = sum(1 for word in query_words if word in title)
-                snippet_score = sum(1 for word in query_words if word in snippet)
+                # Формируем запрос для LLM
+                user_message = f"""
+                Исходный запрос пользователя: {original_query}
+                Подзапрос: {subtopic}
                 
-                # Базовый рейтинг - сумма вхождений в заголовок и сниппет с разными весами
-                base_score = (title_score * 2) + snippet_score
+                Результат поиска:
+                Заголовок: {title}
+                Сниппет: {snippet}
+                URL: {url}
+                """
                 
-                # Дополнительные факторы ранжирования
-                additional_score = 0
+                payload = {
+                    "model": AITUNNEL_MODEL,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": RANKING_SEARCH_RESULT_PROMPT
+                        },
+                        {
+                            "role": "user",
+                            "content": user_message
+                        }
+                    ]
+                }
                 
-                # Бонус за точное соответствие запросу в заголовке
-                if original_query.lower() in title:
-                    additional_score += 5
+                # Ограничиваем частоту запросов к API
+                time.sleep(1.0 / AITUNNEL_RPS)
                 
-                # Бонус за точное соответствие запросу в сниппете
-                if original_query.lower() in snippet:
-                    additional_score += 3
-                
-                # Общий рейтинг
-                total_score = base_score + additional_score
-                
-                # Копируем результат и добавляем поле с рейтингом
-                ranked_result = result.copy()
-                ranked_result["rank"] = total_score
-                ranked_result["subtopic"] = subtopic
-                
-                all_results.append(ranked_result)
+                try:
+                    response = requests.post(AITUNNEL_API_URL, headers=headers, json=payload)
+                    
+                    if response.status_code == 200:
+                        llm_response = response.json()
+                        llm_text = llm_response["choices"][0]["message"]["content"]
+                        
+                        try:
+                            # Извлекаем JSON из ответа
+                            import json
+                            import re
+                            
+                            # Ищем JSON в ответе с помощью регулярного выражения
+                            json_match = re.search(r'```json\s*(\{.*?\})\s*```', llm_text, re.DOTALL)
+                            
+                            if json_match:
+                                ratings_json = json_match.group(1)
+                                ratings = json.loads(ratings_json)
+                                
+                                # Получаем итоговый рейтинг
+                                total_score = ratings.get("итоговый_рейтинг", 0)
+                                
+                                # Копируем результат и добавляем поле с рейтингом и оценками
+                                ranked_result = result.copy()
+                                ranked_result["rank"] = total_score
+                                ranked_result["ratings"] = ratings
+                                ranked_result["subtopic"] = subtopic
+                                
+                                all_results.append(ranked_result)
+                                
+                                logger.info(f"Рейтинг для {title}: {total_score}")
+                            else:
+                                logger.error(f"Не удалось извлечь JSON из ответа LLM: {llm_text}")
+                                
+                                # Если не удалось получить JSON, используем базовый рейтинг
+                                ranked_result = result.copy()
+                                ranked_result["rank"] = 5.0  # Средний рейтинг по умолчанию
+                                ranked_result["subtopic"] = subtopic
+                                
+                                all_results.append(ranked_result)
+                        except json.JSONDecodeError as json_error:
+                            logger.error(f"Ошибка при разборе JSON из ответа LLM: {json_error}")
+                            
+                            # Если не удалось разобрать JSON, используем базовый рейтинг
+                            ranked_result = result.copy()
+                            ranked_result["rank"] = 5.0  # Средний рейтинг по умолчанию
+                            ranked_result["subtopic"] = subtopic
+                            
+                            all_results.append(ranked_result)
+                    else:
+                        logger.error(f"Ошибка при запросе к LLM API: {response.status_code}, {response.text}")
+                        
+                        # Если запрос не удался, используем базовый рейтинг
+                        ranked_result = result.copy()
+                        ranked_result["rank"] = 5.0  # Средний рейтинг по умолчанию
+                        ranked_result["subtopic"] = subtopic
+                        
+                        all_results.append(ranked_result)
+                        
+                except Exception as e:
+                    logger.error(f"Ошибка при ранжировании с помощью LLM: {e}")
+                    
+                    # Если возникла ошибка, используем базовый алгоритм ранжирования
+                    # Расчет рейтинга на основе текста сниппета и заголовка
+                    query_words = set(original_query.lower().split())
+                    title_lower = title.lower()
+                    snippet_lower = snippet.lower()
+                    
+                    # Считаем вхождения ключевых слов из запроса
+                    title_score = sum(1 for word in query_words if word in title_lower)
+                    snippet_score = sum(1 for word in query_words if word in snippet_lower)
+                    
+                    # Базовый рейтинг - сумма вхождений в заголовок и сниппет с разными весами
+                    base_score = (title_score * 2) + snippet_score
+                    
+                    # Дополнительные факторы ранжирования
+                    additional_score = 0
+                    
+                    # Бонус за точное соответствие запросу в заголовке
+                    if original_query.lower() in title_lower:
+                        additional_score += 5
+                    
+                    # Бонус за точное соответствие запросу в сниппете
+                    if original_query.lower() in snippet_lower:
+                        additional_score += 3
+                    
+                    # Общий рейтинг, нормализуем до шкалы 0-10
+                    total_score = min(10, (base_score + additional_score) / 2)
+                    
+                    # Копируем результат и добавляем поле с рейтингом
+                    ranked_result = result.copy()
+                    ranked_result["rank"] = total_score
+                    ranked_result["subtopic"] = subtopic
+                    
+                    all_results.append(ranked_result)
         
         # Сортируем результаты по рейтингу (от большего к меньшему)
         sorted_results = sorted(all_results, key=lambda x: x["rank"], reverse=True)

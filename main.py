@@ -227,6 +227,12 @@ async def main():
             print_step(5, "Выполнение поиска")
             print(f"Выполняем поиск по {len(final_subtopics)} подзапросам...")
             
+            # Информация о лимитах API
+            print("\nВажно: Поиск может занять некоторое время из-за ограничений API:")
+            print("- SearchXNG: до 10 запросов в минуту")
+            print("- r.jina.ai: до 5 запросов в секунду (для получения Markdown-представления страниц)")
+            print("- AITUNNEL: до 2 запросов в секунду (для рейтинга и саммаризации)\n")
+            
             # Анимация поиска
             show_animation()
             
@@ -237,9 +243,16 @@ async def main():
                 print("Не удалось выполнить поиск. Пожалуйста, проверьте подключение к интернету и попробуйте снова.")
                 continue
             
-            # Шаг 6: Ранжирование результатов поиска
-            print_step(6, "Ранжирование результатов поиска")
+            # Шаг 6: Ранжирование результатов поиска с использованием LLM
+            print_step(6, "Ранжирование результатов поиска с помощью языковой модели")
             search_result_ranker = SearchResultRanker()
+            
+            print("Оценка результатов поиска по 5 критериям с помощью языковой модели:")
+            print("1. Соответствие исходному запросу")
+            print("2. Соответствие направлению поиска")
+            print("3. Полнота информации")
+            print("4. Точность информации")
+            print("5. Читабельность и структура")
             
             # Обрабатываем результаты поиска: фильтруем дубликаты, ранжируем и выбираем топ-5
             top_results = search_result_ranker.process_search_results(search_results, query)
@@ -251,16 +264,22 @@ async def main():
             
             # Шаг 7: Саммаризация документов
             print_step(7, "Саммаризация документов")
-            document_summarizer = DocumentSummarizer()
+            print("Создание саммари для найденных документов...")
             
-            print("Выполняем саммаризацию документов...")
-            documents_with_summaries = document_summarizer.process_documents(top_results, theme_name)
+            summarizer = DocumentSummarizer()
+            documents_with_summaries = summarizer.process_documents(top_results, theme_name)
             
-            # Шаг 8: Ранжирование саммари
-            print_step(8, "Ранжирование саммари")
+            # Шаг 8: Ранжирование саммари с использованием LLM
+            print_step(8, "Ранжирование саммари с помощью языковой модели")
             summary_ranker = SummaryRanker()
             
-            # Обрабатываем саммари: ранжируем и выбираем топ-5
+            print("Оценка саммари по 5 критериям с помощью языковой модели:")
+            print("1. Соответствие исходному запросу")
+            print("2. Полнота информации")
+            print("3. Точность информации")
+            print("4. Информативность")
+            print("5. Читабельность и структура")
+            
             top_summaries = summary_ranker.process_summaries(documents_with_summaries, query)
             
             # Сохраняем отранжированные саммари
@@ -268,50 +287,38 @@ async def main():
             
             print(f"Отранжировано {len(top_summaries)} саммари.")
             
-            # Шаг 9: Генерация ответа
-            print_step(9, "Генерация ответа")
+            # Шаг 9: Генерация итогового ответа
+            print_step(9, "Генерация итогового ответа")
+            print("Формирование структурированного ответа на основе лучших саммари...")
+            
             answer_generator = AnswerGenerator()
+            answer = answer_generator.generate_answer(query, top_summaries)
             
-            print("Генерация структурированного ответа...")
-            answer = answer_generator.generate_answer(top_summaries, query)
+            # Сохраняем ответ в файл
+            answer_file = os.path.join("cache", f"{theme_name}_answer.md")
             
-            if answer:
-                # Сохраняем запрос и ответ в файлы
-                request_file = answer_generator.save_request_to_file(query, theme_name)
-                answer_file = answer_generator.save_answer_to_file(answer, query, theme_name)
-                
-                print("\nОтвет успешно сгенерирован!")
-                print(f"Ответ сохранен в файл: {answer_file}")
-                
-                # Выводим ответ в консоль
-                print("\n" + "=" * 80)
-                print("ОТВЕТ НА ЗАПРОС".center(80))
-                print("=" * 80 + "\n")
-                print(answer)
-                print("\n" + "=" * 80 + "\n")
-            else:
-                print("Не удалось сгенерировать ответ.")
+            with open(answer_file, "w", encoding="utf-8") as f:
+                f.write(answer)
             
-            # Спрашиваем, хочет ли пользователь продолжить работу с программой
-            while True:
-                continue_choice = input("\nХотите выполнить новый поиск (да/нет)? ").strip().lower()
-                
-                if continue_choice in ["нет", "н", "no", "n"]:
-                    print("\nЗавершение работы программы...")
-                    return
-                
-                if continue_choice in ["да", "д", "yes", "y"]:
-                    break
-                
-                print("Пожалуйста, введите 'да' или 'нет'.")
-                
+            print(f"\nОтвет сохранен в файл: {answer_file}")
+            
+            # Шаг 10: Отображение ответа
+            print_step(10, "Итоговый ответ")
+            print("\n" + answer)
+            
+            # Предлагаем пользователю ввести новый запрос
+            print("\nНажмите Enter для ввода нового запроса...")
+            input()
+            
         except KeyboardInterrupt:
-            print("\nПрограмма прервана пользователем.")
-            return
+            print("\n\nПрограмма прервана пользователем.")
+            break
         except Exception as e:
             logger.error(f"Произошла ошибка: {e}")
             print(f"\nПроизошла ошибка: {e}")
             print("Пожалуйста, попробуйте снова.")
+            import traceback
+            logger.error(traceback.format_exc())
 
 if __name__ == "__main__":
     # Запуск основной функции с асинхронной поддержкой

@@ -23,74 +23,106 @@ class AnswerGenerator:
             "Authorization": f"Bearer {self.api_key}"
         }
     
-    def generate_answer(self, top_summaries, original_query):
+    def generate_answer(self, query, summaries):
         """
-        Генерирует структурированный ответ на основе топ саммари
+        Генерирует структурированный ответ на основе саммари
         
         Args:
-            top_summaries (list): Список отранжированных саммари
-            original_query (str): Исходный запрос пользователя
+            query (str): Исходный запрос пользователя
+            summaries (list): Список отранжированных саммари
             
         Returns:
-            str: Структурированный ответ на запрос или None в случае ошибки
+            str: Структурированный ответ
         """
         try:
             # Формируем контекст из саммари
             context = ""
-            for i, summary_doc in enumerate(top_summaries, 1):
-                title = summary_doc.get("title", "Без заголовка")
-                url = summary_doc.get("url", "")
-                summary = summary_doc.get("summary", "")
-                
-                context += f"### Документ {i}: {title}\n"
-                context += f"Источник: {url}\n\n"
-                context += f"{summary}\n\n"
+            sources = []
             
-            # Формируем запрос к API
-            prompt = f"""
-На основе приведенных ниже саммари документов, составь структурированный и информативный ответ на следующий запрос:
-
-ЗАПРОС: {original_query}
-
-КОНТЕКСТ:
-{context}
-
-Требования к ответу:
-1. Структурированный и логичный текст, разделенный на разделы и подразделы (с использованием заголовков Markdown)
-2. Включение всей ключевой информации из предоставленных саммари
-3. Отсутствие дублирования информации
-4. Объективность и фактографичность
-5. Добавление в конце списка источников информации с указанием URL (использованные документы)
-
-Формат ответа должен быть в Markdown.
-"""
+            for i, summary_doc in enumerate(summaries):
+                summary = summary_doc.get("summary", "")
+                title = summary_doc.get("title", f"Источник {i+1}")
+                url = summary_doc.get("url", "")
+                
+                if summary:
+                    context += f"\nИСТОЧНИК {i+1}:\nЗаголовок: {title}\nURL: {url}\n\n{summary}\n\n"
+                    sources.append(f"{i+1}. [{title}]({url})")
+            
+            # Формируем промпт для генерации ответа
+            answer_prompt = f"""
+            Ты – профессиональный аналитик, который создает структурированные, информативные ответы на основе предоставленных источников.
+            
+            Твоя задача – составить исчерпывающий ответ на запрос пользователя, основываясь ТОЛЬКО на предоставленных саммари источников.
+            
+            ЗАПРОС ПОЛЬЗОВАТЕЛЯ:
+            {query}
+            
+            ПРЕДОСТАВЛЕННЫЕ ИСТОЧНИКИ:
+            {context}
+            
+            ТРЕБОВАНИЯ К ОТВЕТУ:
+            1. Начни с краткого введения, поясняющего суть вопроса
+            2. Раздели ответ на логические разделы с подзаголовками
+            3. Структурируй информацию от общего к частному
+            4. В конце предоставь список использованных источников в формате Markdown
+            5. Убедись, что весь ответ использует Markdown для форматирования
+            6. Сосредоточься только на фактах из предоставленных источников, не добавляй собственную информацию
+            
+            ФОРМАТ ОТВЕТА:
+            # Ответ на запрос: {query}
+            
+            ## Введение
+            ...
+            
+            ## Основные разделы
+            ...
+            
+            ## Заключение
+            ...
+            
+            ## Использованные источники
+            - [Название источника 1](URL1)
+            - [Название источника 2](URL2)
+            ...
+            """
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {AITUNNEL_API_KEY}"
+            }
             
             payload = {
                 "model": AITUNNEL_MODEL,
-                "max_tokens": 4000,
                 "messages": [
                     {
                         "role": "user",
-                        "content": prompt
+                        "content": answer_prompt
                     }
                 ]
             }
             
-            response = requests.post(AITUNNEL_API_URL, headers=self.headers, json=payload)
+            # Выполняем запрос к LLM API
+            response = requests.post(AITUNNEL_API_URL, headers=headers, json=payload)
             
             if response.status_code == 200:
-                result = response.json()
-                answer = result["choices"][0]["message"]["content"]
-                logger.info(f"Ответ успешно сгенерирован, длина: {len(answer)}")
+                llm_response = response.json()
+                answer = llm_response["choices"][0]["message"]["content"]
+                
+                # Добавляем список источников, если их нет в ответе
+                if "## Использованные источники" not in answer:
+                    answer += "\n\n## Использованные источники\n"
+                    for source in sources:
+                        answer += f"- {source}\n"
+                
                 return answer
             else:
                 logger.error(f"Ошибка при обращении к API: {response.status_code}")
                 logger.error(response.text)
-                return None
+                return f"Не удалось сгенерировать ответ: {response.status_code}"
                 
         except Exception as e:
-            logger.error(f"Произошла ошибка при генерации ответа: {e}")
-            return None
+            logger.error(f"Ошибка при генерации ответа: {e}")
+            return f"Произошла ошибка при генерации ответа: {e}"
     
     def save_answer_to_file(self, answer, query, theme_name, cache_dir="cache"):
         """

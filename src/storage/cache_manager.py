@@ -14,21 +14,31 @@ class CacheManager:
     """
     Класс для управления кэшированием данных поиска и обработки
     """
-    def __init__(self, cache_dir=None, max_age_days=30):
+    def __init__(self):
         """
         Инициализирует менеджер кэша
-        
-        Args:
-            cache_dir (str, optional): Путь к директории кэша. По умолчанию используется CACHE_DIR из config.py
-            max_age_days (int, optional): Максимальный возраст кэша в днях. По умолчанию 30 дней.
         """
-        self.cache_dir = cache_dir or CACHE_DIR
-        self.max_age_days = max_age_days
-        
-        # Создаем базовые директории для кэша
+        # Базовые директории
+        self.cache_dir = os.path.join(os.getcwd(), "cache")
         create_directory(self.cache_dir)
-        create_directory(DOCS_DIR)
-        create_directory(SUMMARIES_DIR)
+        
+        # Директории для различных типов данных
+        self.docs_dir = os.path.join(self.cache_dir, "docs")
+        self.summaries_dir = os.path.join(self.cache_dir, "summaries")
+        self.search_queries_dir = os.path.join(self.cache_dir, "search_queries")
+        self.search_results_dir = os.path.join(self.cache_dir, "search_results")
+        self.ranked_results_dir = os.path.join(self.cache_dir, "ranked_results")
+        self.ranked_summaries_dir = os.path.join(self.cache_dir, "ranked_summaries")
+        
+        # Создаем все директории
+        create_directory(self.docs_dir)
+        create_directory(self.summaries_dir)
+        create_directory(self.search_queries_dir)
+        create_directory(self.search_results_dir)
+        create_directory(self.ranked_results_dir)
+        create_directory(self.ranked_summaries_dir)
+        
+        logger.info("Менеджер кэша инициализирован")
     
     def generate_theme_name(self, query):
         """
@@ -60,7 +70,7 @@ class CacheManager:
         """
         total_removed = 0
         now = datetime.now()
-        max_age = timedelta(days=self.max_age_days)
+        max_age = timedelta(days=30)
         
         try:
             # Проверяем все файлы в директории кэша

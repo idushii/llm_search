@@ -7,6 +7,7 @@ import re
 from collections import Counter
 
 from src.core.utils import logger
+from src.core.config import RANKING_SUMMARY_PROMPT
 
 class SummaryRanker:
     """
@@ -43,7 +44,7 @@ class SummaryRanker:
     
     def rank_by_keywords(self, summaries, original_query):
         """
-        Ранжирует саммари по ключевым словам из исходного запроса
+        Ранжирует саммари по релевантности к исходному запросу с использованием LLM
         
         Args:
             summaries (list): Список саммари
@@ -52,42 +53,147 @@ class SummaryRanker:
         Returns:
             list: Список отсортированных саммари с рейтингом
         """
-        # Извлекаем ключевые слова из запроса
-        query_keywords = self.extract_keywords(original_query)
+        import requests
+        import time
+        from src.core.config import AITUNNEL_API_KEY, AITUNNEL_MODEL, AITUNNEL_API_URL, AITUNNEL_RPS
         
         ranked_summaries = []
         
+       
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {AITUNNEL_API_KEY}"
+        }
+        
+        logger.info(f"Ранжирование саммари для запроса: {original_query}")
+        
         for summary_doc in summaries:
             summary_text = summary_doc.get("summary", "")
+            title = summary_doc.get("title", "")
+            url = summary_doc.get("url", "")
             
             # Если саммари нет, пропускаем документ
             if not summary_text:
                 continue
             
-            # Извлекаем ключевые слова из саммари
-            summary_keywords = self.extract_keywords(summary_text)
+            # Ограничиваем длину саммари для запроса (примерно 1 токен = 4 символа)
+            truncated_summary = summary_text[:4000]
             
-            # Подсчитываем вхождения ключевых слов из запроса в саммари
-            keyword_count = sum(1 for word in summary_keywords if word in query_keywords)
+            # Формируем запрос для LLM
+            user_message = f"""
+            Исходный запрос пользователя: {original_query}
             
-            # Нормализуем на длину текста для предотвращения перекоса в сторону длинных текстов
-            normalized_score = keyword_count / (len(summary_keywords) + 1) * 100
+            Саммари документа:
+            Заголовок: {title}
+            URL: {url}
             
-            # Добавляем бонус за точные фразы из запроса
-            exact_phrase_bonus = 0
-            for i in range(len(query_keywords) - 1):
-                phrase = f"{query_keywords[i]} {query_keywords[i+1]}"
-                if phrase in " ".join(summary_keywords):
-                    exact_phrase_bonus += 5
+            Текст саммари:
+            {truncated_summary}
+            """
             
-            # Итоговый рейтинг
-            total_score = normalized_score + exact_phrase_bonus
+            payload = {
+                "model": AITUNNEL_MODEL,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": RANKING_SUMMARY_PROMPT
+                    },
+                    {
+                        "role": "user",
+                        "content": user_message
+                    }
+                ]
+            }
             
-            # Создаем копию документа с рейтингом
-            ranked_summary = summary_doc.copy()
-            ranked_summary["rank"] = total_score
+            # Ограничиваем частоту запросов к API
+            time.sleep(1.0 / AITUNNEL_RPS)
             
-            ranked_summaries.append(ranked_summary)
+            try:
+                response = requests.post(AITUNNEL_API_URL, headers=headers, json=payload)
+                
+                if response.status_code == 200:
+                    llm_response = response.json()
+                    llm_text = llm_response["choices"][0]["message"]["content"]
+                    
+                    try:
+                        # Извлекаем JSON из ответа
+                        import json
+                        import re
+                        
+                        # Ищем JSON в ответе с помощью регулярного выражения
+                        json_match = re.search(r'```json\s*(\{.*?\})\s*```', llm_text, re.DOTALL)
+                        
+                        if json_match:
+                            ratings_json = json_match.group(1)
+                            ratings = json.loads(ratings_json)
+                            
+                            # Получаем итоговый рейтинг
+                            total_score = ratings.get("итоговый_рейтинг", 0)
+                            
+                            # Копируем документ с саммари и добавляем поле с рейтингом и оценками
+                            ranked_summary = summary_doc.copy()
+                            ranked_summary["rank"] = total_score
+                            ranked_summary["ratings"] = ratings
+                            
+                            ranked_summaries.append(ranked_summary)
+                            
+                            logger.info(f"Рейтинг для саммари '{title}': {total_score}")
+                        else:
+                            logger.error(f"Не удалось извлечь JSON из ответа LLM: {llm_text}")
+                            
+                            # Если не удалось получить JSON, используем базовый рейтинг
+                            ranked_summary = summary_doc.copy()
+                            ranked_summary["rank"] = 5.0  # Средний рейтинг по умолчанию
+                            
+                            ranked_summaries.append(ranked_summary)
+                    except json.JSONDecodeError as json_error:
+                        logger.error(f"Ошибка при разборе JSON из ответа LLM: {json_error}")
+                        
+                        # Если не удалось разобрать JSON, используем базовый рейтинг
+                        ranked_summary = summary_doc.copy()
+                        ranked_summary["rank"] = 5.0  # Средний рейтинг по умолчанию
+                        
+                        ranked_summaries.append(ranked_summary)
+                else:
+                    logger.error(f"Ошибка при запросе к LLM API: {response.status_code}, {response.text}")
+                    
+                    # Если запрос не удался, используем базовый рейтинг
+                    ranked_summary = summary_doc.copy()
+                    ranked_summary["rank"] = 5.0  # Средний рейтинг по умолчанию
+                    
+                    ranked_summaries.append(ranked_summary)
+                
+            except Exception as e:
+                logger.error(f"Ошибка при ранжировании саммари с помощью LLM: {e}")
+                
+                # Если возникла ошибка, используем базовый алгоритм ранжирования на основе ключевых слов
+                # Извлекаем ключевые слова из запроса
+                query_keywords = self.extract_keywords(original_query)
+                
+                # Извлекаем ключевые слова из саммари
+                summary_keywords = self.extract_keywords(summary_text)
+                
+                # Подсчитываем вхождения ключевых слов из запроса в саммари
+                keyword_count = sum(1 for word in summary_keywords if word in query_keywords)
+                
+                # Нормализуем на длину текста для предотвращения перекоса в сторону длинных текстов
+                normalized_score = keyword_count / (len(summary_keywords) + 1) * 100
+                
+                # Добавляем бонус за точные фразы из запроса
+                exact_phrase_bonus = 0
+                for i in range(len(query_keywords) - 1):
+                    phrase = f"{query_keywords[i]} {query_keywords[i+1]}"
+                    if phrase in " ".join(summary_keywords):
+                        exact_phrase_bonus += 5
+                
+                # Итоговый рейтинг, нормализуем до шкалы 0-10
+                total_score = min(10, (normalized_score + exact_phrase_bonus) / 20)
+                
+                # Создаем копию документа с рейтингом
+                ranked_summary = summary_doc.copy()
+                ranked_summary["rank"] = total_score
+                
+                ranked_summaries.append(ranked_summary)
         
         # Сортируем саммари по рейтингу (от большего к меньшему)
         sorted_summaries = sorted(ranked_summaries, key=lambda x: x["rank"], reverse=True)

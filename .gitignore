@@ -105,7 +105,24 @@ venv.bak/
 *.swo
 
 # Project specific
-cache/
+# Exclude cache contents but keep directories
+cache/*
+!cache/.gitignore
+!cache/search_queries/
+!cache/search_results/
+!cache/ranked_results/
+!cache/ranked_summaries/
+!cache/docs/
+cache/search_queries/*
+cache/search_results/*
+cache/ranked_results/*
+cache/ranked_summaries/*
+cache/docs/*
+!cache/search_queries/.gitignore
+!cache/search_results/.gitignore
+!cache/ranked_results/.gitignore
+!cache/ranked_summaries/.gitignore
+!cache/docs/.gitignore
 logs/
 *.db
 app.log

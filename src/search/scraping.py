@@ -9,7 +9,7 @@ import requests
 import time
 import hashlib
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from src.core.config import (
     SEARCHXNG_BASIC_AUTH_LOGIN, 
@@ -22,47 +22,8 @@ from src.core.config import (
 )
 from src.core.constants import HTTP_OK
 from src.core.utils import logger, generate_hash, create_directory
-
-class RateLimiter:
-    """
-    Класс для ограничения скорости запросов
-    """
-    def __init__(self):
-        # Словарь с временем последнего запроса для каждого сервиса
-        self.last_request_time = {
-            "searchxng": 0,
-            "jina": 0,
-            "aitunnel": 0
-        }
-        
-        # Интервалы между запросами в секундах для разных сервисов
-        self.intervals = {
-            "searchxng": SEARCHXNG_INTERVAL,  # Интервал для равномерного распределения по минуте
-            "jina": 1.0 / JINA_RPS,  # Интервал для Jina (запросов в секунду)
-            "aitunnel": 1.0 / AITUNNEL_RPS  # Интервал для Aitunnel (запросов в секунду)
-        }
-    
-    async def wait(self, service):
-        """
-        Ожидает необходимое время перед следующим запросом к сервису
-        
-        Args:
-            service (str): Название сервиса ("searchxng", "jina", "aitunnel")
-        """
-        if service not in self.intervals:
-            logger.warning(f"Неизвестный сервис: {service}, лимитирование не применяется")
-            return
-            
-        current_time = time.time()
-        time_since_last_request = current_time - self.last_request_time[service]
-        sleep_time = max(0, self.intervals[service] - time_since_last_request)
-        
-        if sleep_time > 0:
-            logger.debug(f"Ожидание {sleep_time:.2f} сек перед запросом к {service}")
-            await asyncio.sleep(sleep_time)
-            
-        self.last_request_time[service] = time.time()
-
+from src.core.rate_limiter import RateLimiter
+from src.core.config import SEARCHXNG_API_URL
 
 class SearchEngine:
     """
@@ -70,7 +31,7 @@ class SearchEngine:
     """
     def __init__(self):
         # URL для поискового сервиса
-        self.search_url = "https://searchxng.ai/api/v1/search"
+        self.search_url = SEARCHXNG_API_URL
         
         # Создаем объект для ограничения скорости запросов
         self.rate_limiter = RateLimiter()
@@ -79,7 +40,7 @@ class SearchEngine:
         create_directory(CACHE_DIR)
         create_directory(DOCS_DIR)
         
-    async def search_topic(self, query, session, max_results=10):
+    async def search_topic(self, query, session, max_results=10, format="json"):
         """
         Выполняет поиск по запросу
         
@@ -87,6 +48,7 @@ class SearchEngine:
             query (str): Поисковый запрос
             session (aiohttp.ClientSession): Сессия для HTTP-запросов
             max_results (int): Максимальное количество результатов
+            format (str): Формат результатов поиска (json, html)
             
         Returns:
             list: Список результатов поиска
@@ -97,13 +59,16 @@ class SearchEngine:
             
             # Формируем параметры запроса
             params = {
-                "query": query,
-                "max_results": max_results
+                "q": query,
+                "max_results": max_results,
+                "format": format
             }
+            
+            link = self.search_url + "?" + urlencode(params)
             
             # Делаем запрос с базовой аутентификацией
             auth = aiohttp.BasicAuth(SEARCHXNG_BASIC_AUTH_LOGIN, SEARCHXNG_BASIC_AUTH_PASSWORD)
-            async with session.get(self.search_url, params=params, auth=auth) as response:
+            async with session.get(link, auth=auth) as response:
                 if response.status == HTTP_OK:
                     result = await response.json()
                     logger.info(f"Найдено {len(result['results'])} результатов для запроса: {query}")
@@ -118,47 +83,111 @@ class SearchEngine:
     
     async def fetch_page_content(self, url, session):
         """
-        Получает содержимое страницы по URL
+        Получает содержимое страницы по URL, используя сервис r.jina.ai для преобразования в Markdown
         
         Args:
             url (str): URL страницы
             session (aiohttp.ClientSession): Сессия для HTTP-запросов
             
         Returns:
-            str: Содержимое страницы или None в случае ошибки
+            str: Содержимое страницы в формате Markdown или None в случае ошибки
         """
         try:
             # Генерируем хеш URL для кэширования
             url_hash = generate_hash(url)
-            cache_path = os.path.join(DOCS_DIR, f"{url_hash}.html")
+            cache_path = os.path.join(DOCS_DIR, f"{url_hash}.md")
             
             # Проверяем, есть ли страница в кэше
             if os.path.exists(cache_path):
                 logger.info(f"Загрузка страницы из кэша: {url}")
                 with open(cache_path, "r", encoding="utf-8", errors="ignore") as f:
                     return f.read()
-                    
+            
+            # URL для r.jina.ai API
+            jina_url = f"https://r.jina.ai/{quote(url)}"
+            
             # Ожидаем перед запросом в соответствии с ограничениями API
             await self.rate_limiter.wait("jina")
             
-            logger.info(f"Загрузка страницы: {url}")
-            async with session.get(url, timeout=30) as response:
+            logger.info(f"Загрузка и преобразование страницы через r.jina.ai: {url}")
+            
+            # Устанавливаем таймаут и заголовки
+            timeout = aiohttp.ClientTimeout(total=30)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml"
+            }
+            
+            async with session.get(jina_url, headers=headers, timeout=timeout) as response:
                 if response.status == HTTP_OK:
-                    content = await response.text()
+                    # r.jina.ai возвращает содержимое сразу в формате Markdown
+                    markdown_content = await response.text()
                     
-                    # Сохраняем страницу в кэш
-                    with open(cache_path, "w", encoding="utf-8", errors="ignore") as f:
-                        f.write(content)
+                    # Проверяем, что получен действительный Markdown-контент
+                    if markdown_content and len(markdown_content) > 100:  # Минимальная длина для валидного контента
+                        # Сохраняем Markdown в кэш
+                        with open(cache_path, "w", encoding="utf-8", errors="ignore") as f:
+                            f.write(markdown_content)
                         
-                    return content
+                        return markdown_content
+                    else:
+                        logger.warning(f"Получен пустой или слишком короткий Markdown от r.jina.ai для {url}")
                 else:
-                    logger.error(f"Ошибка при загрузке страницы {url}: {response.status}")
-                    return None
+                    logger.error(f"Ошибка при обращении к r.jina.ai для {url}: {response.status}")
+                    
+                    # Попробуем запасной вариант - прямое скачивание и извлечение текста
+                    try:
+                        logger.info(f"Попытка прямого скачивания страницы: {url}")
+                        # Повторно ожидаем, но уже не для jina
+                        await asyncio.sleep(1)
+                        
+                        async with session.get(url, headers=headers, timeout=timeout) as direct_response:
+                            if direct_response.status == HTTP_OK:
+                                html_content = await direct_response.text()
+                                
+                                # Извлекаем текст и конвертируем в простой Markdown
+                                from bs4 import BeautifulSoup
+                                soup = BeautifulSoup(html_content, 'html.parser')
+                                
+                                # Удаляем скрипты и стили
+                                for script_or_style in soup(["script", "style"]):
+                                    script_or_style.extract()
+                                
+                                # Получаем текст и форматируем его как простой Markdown
+                                paragraphs = []
+                                
+                                # Обрабатываем заголовки
+                                for i in range(1, 7):
+                                    for header in soup.find_all(f'h{i}'):
+                                        paragraphs.append(f"{'#' * i} {header.get_text().strip()}\n")
+                                
+                                # Обрабатываем параграфы
+                                for p in soup.find_all('p'):
+                                    paragraphs.append(f"{p.get_text().strip()}\n\n")
+                                
+                                # Обрабатываем списки
+                                for ul in soup.find_all('ul'):
+                                    for li in ul.find_all('li'):
+                                        paragraphs.append(f"* {li.get_text().strip()}\n")
+                                    paragraphs.append("\n")
+                                
+                                # Собираем Markdown
+                                markdown_content = "".join(paragraphs)
+                                
+                                # Сохраняем Markdown в кэш
+                                with open(cache_path, "w", encoding="utf-8", errors="ignore") as f:
+                                    f.write(markdown_content)
+                                
+                                return markdown_content
+                    except Exception as direct_error:
+                        logger.error(f"Ошибка при прямом скачивании страницы {url}: {direct_error}")
+                    
+            return None
         except Exception as e:
             logger.error(f"Ошибка при загрузке страницы {url}: {e}")
             return None
     
-    async def process_search_queries(self, search_queries_dict, max_results_per_query=5, max_pages_per_query=3):
+    async def process_search_queries(self, search_queries_dict, max_results_per_query=10, max_pages_per_query=3, format="json"):
         """
         Обрабатывает поисковые запросы и собирает результаты
         
@@ -166,6 +195,7 @@ class SearchEngine:
             search_queries_dict (dict): Словарь с подзапросами и поисковыми запросами
             max_results_per_query (int): Максимальное количество результатов для каждого запроса
             max_pages_per_query (int): Максимальное количество страниц для загрузки для каждого запроса
+            format (str): Формат результатов поиска (json, html)
             
         Returns:
             dict: Словарь с результатами поиска
@@ -182,7 +212,7 @@ class SearchEngine:
                 # Для каждого поискового запроса в подзапросе
                 for query in search_queries:
                     # Выполняем поиск
-                    search_results = await self.search_topic(query, session, max_results=max_results_per_query)
+                    search_results = await self.search_topic(query, session, max_results=max_results_per_query, format=format)
                     
                     # Ограничиваем количество страниц для загрузки
                     pages_to_download = search_results[:max_pages_per_query]
