@@ -41,7 +41,7 @@ class QueryPlanner:
         """
         try:
             payload = {
-                "model": "gemini-2.0-flash-001",
+                "model": os.getenv("AITUNNEL_MODEL"),
                 "max_tokens": 50000,
                 "messages": [
                     {
