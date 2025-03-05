@@ -78,7 +78,7 @@ def display_subtopics(subtopics):
     while True:
         choice = input("\nХотите отредактировать подзапросы (да/нет)? ").strip().lower()
         
-        if choice in ["нет", "н", "no", "n"]:
+        if choice in ["нет", "н", "no", "n", ""]:
             return subtopics
         
         if choice in ["да", "д", "yes", "y"]:
@@ -342,6 +342,8 @@ async def main():
             print(answer)
             
             # Спрашиваем пользователя о дальнейших действиях
+            print("\n" + "=" * 80)
+            print("\nСсылка на ответ: " + os.path.abspath(f"cache/{theme_name}/answer.html"))
             print("\n" + "=" * 80)
             input("\nНажмите Enter для продолжения...")
             

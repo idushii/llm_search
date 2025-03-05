@@ -5,6 +5,8 @@ import os
 import requests
 import json
 import time
+import markdown
+from bs4 import BeautifulSoup
 
 from src.core.config import AITUNNEL_API_KEY, AITUNNEL_MODEL, AITUNNEL_API_URL, AITUNNEL_RPS
 from src.core.constants import ANSWER_FILE
@@ -81,7 +83,7 @@ class AnswerGenerator:
             5. Убедись, что весь ответ использует Markdown для форматирования
             6. Сосредоточься только на фактах из предоставленных источников, не добавляй собственную информацию
             7. Найди и проанализируй ключевые моменты из полных текстов документов
-            8. Добавляй отметки о том, откуда была взята информация
+            8. Добавляй отметки о том, откуда была взята информация в формате: [Название источника 1](URL1)
             
             ФОРМАТ ОТВЕТА:
             # Ответ на запрос: {query}
@@ -131,10 +133,22 @@ class AnswerGenerator:
                 
                 print("Ответ успешно сгенерирован!")
                 
-                # Если указано имя темы, сохраняем ответ и запрос
+                # Если указано имя темы, сохраняем ответ в разных форматах
                 if theme_name:
-                    self.save_answer_to_file(answer, query, theme_name)
-                    self.save_request_to_file(query, theme_name)
+                    # Сохраняем Markdown версию
+                    markdown_path = self.save_answer_to_file(answer, query, theme_name)
+                    if markdown_path:
+                        print(f"Markdown версия ответа сохранена в: {markdown_path}")
+                    
+                    # Сохраняем HTML версию
+                    html_path = self.save_answer_to_html(answer, query, theme_name)
+                    if html_path:
+                        print(f"HTML версия ответа сохранена в: {html_path}")
+                    
+                    # Сохраняем запрос
+                    request_path = self.save_request_to_file(query, theme_name)
+                    if request_path:
+                        print(f"Запрос сохранен в: {request_path}")
                 
                 return answer
             else:
@@ -205,4 +219,109 @@ class AnswerGenerator:
             return file_path
         except Exception as e:
             logger.error(f"Ошибка при сохранении запроса: {e}")
+            return None
+
+    def save_answer_to_html(self, answer, query, theme_name, cache_dir="cache"):
+        """
+        Сохраняет ответ в HTML формате
+        
+        Args:
+            answer (str): Сгенерированный ответ в формате Markdown
+            query (str): Исходный запрос пользователя
+            theme_name (str): Название темы (для имени каталога)
+            cache_dir (str): Директория кэша
+            
+        Returns:
+            str: Путь к созданному файлу или None в случае ошибки
+        """
+        try:
+            # Создаем директорию для темы, если она не существует
+            theme_dir = os.path.join(cache_dir, theme_name)
+            create_directory(theme_dir)
+            
+            # Генерируем имя файла
+            file_path = os.path.join(theme_dir, "answer.html")
+            
+            # Добавляем заголовок с запросом
+            markdown_content = f"# Ответ на запрос: {query}\n\n{answer}"
+            
+            # Конвертируем Markdown в HTML
+            html_content = markdown.markdown(markdown_content)
+            
+            # Создаем красивый HTML с CSS стилями
+            html_template = f"""
+            <!DOCTYPE html>
+            <html lang="ru">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Ответ на запрос: {query}</title>
+                <style>
+                    body {{
+                        font-family: Arial, sans-serif;
+                        line-height: 1.6;
+                        max-width: 800px;
+                        margin: 0 auto;
+                        padding: 20px;
+                        color: #333;
+                    }}
+                    h1 {{
+                        color: #2c3e50;
+                        border-bottom: 2px solid #eee;
+                        padding-bottom: 10px;
+                    }}
+                    h2 {{
+                        color: #34495e;
+                        margin-top: 30px;
+                    }}
+                    p {{
+                        margin-bottom: 15px;
+                    }}
+                    a {{
+                        color: #3498db;
+                        text-decoration: none;
+                    }}
+                    a:hover {{
+                        text-decoration: underline;
+                    }}
+                    ul, ol {{
+                        margin-bottom: 15px;
+                        padding-left: 20px;
+                    }}
+                    li {{
+                        margin-bottom: 5px;
+                    }}
+                    code {{
+                        background-color: #f8f9fa;
+                        padding: 2px 5px;
+                        border-radius: 3px;
+                        font-family: monospace;
+                    }}
+                    pre {{
+                        background-color: #f8f9fa;
+                        padding: 15px;
+                        border-radius: 5px;
+                        overflow-x: auto;
+                    }}
+                    blockquote {{
+                        border-left: 4px solid #ddd;
+                        margin: 15px 0;
+                        padding-left: 15px;
+                        color: #666;
+                    }}
+                </style>
+            </head>
+            <body>
+                {html_content}
+            </body>
+            </html>
+            """
+            
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(html_template)
+            
+            logger.info(f"HTML версия ответа сохранена в файл: {file_path}")
+            return file_path
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении HTML версии ответа: {e}")
             return None 
