@@ -83,7 +83,7 @@ class AnswerGenerator:
             5. Убедись, что весь ответ использует Markdown для форматирования
             6. Сосредоточься только на фактах из предоставленных источников, не добавляй собственную информацию
             7. Найди и проанализируй ключевые моменты из полных текстов документов
-            8. Добавляй отметки о том, откуда была взята информация в формате: [Название источника 1](URL1)
+            8. Добавляй отметки о том, откуда была взята информация в формате: [Источник #1](URL1)
             
             ФОРМАТ ОТВЕТА:
             # Ответ на запрос: {query}
@@ -245,8 +245,8 @@ class AnswerGenerator:
             # Добавляем заголовок с запросом
             markdown_content = f"# Ответ на запрос: {query}\n\n{answer}"
             
-            # Конвертируем Markdown в HTML
-            html_content = markdown.markdown(markdown_content)
+            # Конвертируем Markdown в HTML с поддержкой таблиц
+            html_content = markdown.markdown(markdown_content, extensions=['tables'])
             
             # Создаем красивый HTML с CSS стилями
             html_template = f"""
@@ -308,6 +308,38 @@ class AnswerGenerator:
                         margin: 15px 0;
                         padding-left: 15px;
                         color: #666;
+                    }}
+                    /* Стили для таблиц */
+                    table {{
+                        border-collapse: collapse;
+                        width: 100%;
+                        margin: 15px 0;
+                        background-color: #fff;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                    }}
+                    th, td {{
+                        padding: 12px;
+                        text-align: left;
+                        border-bottom: 1px solid #ddd;
+                    }}
+                    th {{
+                        background-color: #f8f9fa;
+                        font-weight: 600;
+                        color: #2c3e50;
+                    }}
+                    tr:nth-child(even) {{
+                        background-color: #f8f9fa;
+                    }}
+                    tr:hover {{
+                        background-color: #f5f5f5;
+                    }}
+                    /* Адаптивность для таблиц */
+                    @media screen and (max-width: 600px) {{
+                        table {{
+                            display: block;
+                            overflow-x: auto;
+                            white-space: nowrap;
+                        }}
                     }}
                 </style>
             </head>
