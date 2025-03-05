@@ -4,3 +4,4 @@ aiohttp==3.9.3
 beautifulsoup4==4.12.2
 asyncio==3.4.3
 markdown==3.5.2 
+auto-py-to-exe==2.9.0

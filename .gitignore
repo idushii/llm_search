@@ -127,3 +127,6 @@ logs/
 *.db
 app.log
 .DS_Store
+
+output/
+Прототипы для веб/
