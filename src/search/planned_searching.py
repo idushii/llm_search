@@ -83,11 +83,11 @@ class SearchQueryPlanner:
         """
         try:
             # Создаем директорию для кэша, если она не существует
-            search_queries_dir = os.path.join(cache_dir, "search_queries")
+            search_queries_dir = os.path.join(cache_dir, theme_name)
             os.makedirs(search_queries_dir, exist_ok=True)
             
             # Генерируем имя файла
-            file_path = os.path.join(search_queries_dir, f"{theme_name}.json")
+            file_path = os.path.join(search_queries_dir, f"search_queries.json")
             
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(subtopics_with_queries, f, ensure_ascii=False, indent=2)

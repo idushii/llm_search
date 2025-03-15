@@ -84,10 +84,11 @@ class TopicPlanner:
         """
         try:
             # Создаем директорию для кэша, если она не существует
-            os.makedirs(cache_dir, exist_ok=True)
+            subtopics_dir = os.path.join(cache_dir, theme_name)
+            os.makedirs(subtopics_dir, exist_ok=True)
             
             # Генерируем имя файла
-            file_path = os.path.join(cache_dir, f"subtopics_{theme_name}.md")
+            file_path = os.path.join(subtopics_dir, f"subtopics.md")
             
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(f"# Подзапросы для поиска по теме: {query}\n\n")

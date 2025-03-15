@@ -274,11 +274,11 @@ class SearchEngine:
         """
         try:
             # Создаем директорию для результатов поиска
-            search_results_dir = os.path.join(cache_dir, "search_results")
+            search_results_dir = os.path.join(cache_dir, theme_name)
             os.makedirs(search_results_dir, exist_ok=True)
             
             # Формируем имя файла
-            file_path = os.path.join(search_results_dir, f"{theme_name}.json")
+            file_path = os.path.join(search_results_dir, f"search_results.json")
             
             # Подготавливаем данные для сохранения - удаляем большие поля
             filtered_results = {}
@@ -373,8 +373,8 @@ async def run_search(search_queries_dict, theme_name):
     # Выполняем поиск по всем запросам и получаем результаты
     search_results = await search_engine.process_search_queries(
         search_queries_dict,
-        max_results_per_query=10,
-        max_pages_per_query=5
+        max_results_per_query=25,
+        max_pages_per_query=1
     )
     
     # Сохраняем результаты поиска в JSON

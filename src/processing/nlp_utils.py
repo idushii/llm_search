@@ -237,16 +237,19 @@ class AnswerGenerator:
         try:
             # Создаем директорию для темы, если она не существует
             theme_dir = os.path.join(cache_dir, theme_name)
+            theme_dir2 = os.path.expanduser(f"~/mind-search")
+
             create_directory(theme_dir)
-            
+            create_directory(theme_dir2)
+
             # Генерируем имя файла
-            file_path = os.path.join(theme_dir, "answer.html")
+            file_path = os.path.expanduser(f"~/mind-search/{theme_name}.html")
             
             # Добавляем заголовок с запросом
             markdown_content = f"# Ответ на запрос: {query}\n\n{answer}"
             
-            # Конвертируем Markdown в HTML с поддержкой таблиц
-            html_content = markdown.markdown(markdown_content, extensions=['tables'])
+            # Конвертируем Markdown в HTML с поддержкой таблиц и списков
+            html_content = markdown.markdown(markdown_content, extensions=['tables', 'nl2br'])
             
             # Создаем красивый HTML с CSS стилями
             html_template = f"""
@@ -284,11 +287,28 @@ class AnswerGenerator:
                     a:hover {{
                         text-decoration: underline;
                     }}
+                    /* Улучшенные стили для списков */
                     ul, ol {{
                         margin-bottom: 15px;
                         padding-left: 20px;
+                        list-style-position: outside;
+                    }}
+                    ul {{
+                        list-style-type: disc;
+                    }}
+                    ul ul {{
+                        list-style-type: circle;
+                    }}
+                    ul ul ul {{
+                        list-style-type: square;
                     }}
                     li {{
+                        margin-bottom: 8px;
+                        padding-left: 5px;
+                    }}
+                    /* Стили для вложенных списков */
+                    li > ul, li > ol {{
+                        margin-top: 5px;
                         margin-bottom: 5px;
                     }}
                     code {{

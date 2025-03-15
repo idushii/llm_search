@@ -300,11 +300,11 @@ class SummaryRanker:
         """
         try:
             # Создаем директорию для результатов ранжирования
-            ranked_summaries_dir = os.path.join(cache_dir, "ranked_summaries")
+            ranked_summaries_dir = os.path.join(cache_dir, theme_name)
             os.makedirs(ranked_summaries_dir, exist_ok=True)
             
             # Формируем имя файла
-            file_path = os.path.join(ranked_summaries_dir, f"{theme_name}.json")
+            file_path = os.path.join(ranked_summaries_dir, f"ranked_summaries.json")
             
             # Подготавливаем данные для сохранения
             serializable_summaries = []

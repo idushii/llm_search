@@ -480,7 +480,7 @@ class SearchResultRanker:
         
         return sorted_results
     
-    def process_search_results(self, search_results, original_query, top_n=5):
+    def process_search_results(self, search_results, original_query, top_n=25):
         """
         Обрабатывает результаты поиска: фильтрует дубликаты, ранжирует и выбирает топ
         
@@ -525,11 +525,11 @@ class SearchResultRanker:
         """
         try:
             # Создаем директорию для результатов поиска
-            ranked_results_dir = os.path.join(cache_dir, "ranked_results")
+            ranked_results_dir = os.path.join(cache_dir, theme_name)
             os.makedirs(ranked_results_dir, exist_ok=True)
             
             # Формируем имя файла
-            file_path = os.path.join(ranked_results_dir, f"{theme_name}.json")
+            file_path = os.path.join(ranked_results_dir, f"ranked_results.json")
             
             # Сохраняем данные в JSON формате с красивым форматированием
             with open(file_path, "w", encoding="utf-8") as file:

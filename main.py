@@ -6,6 +6,7 @@ import sys
 import time
 import asyncio
 from datetime import datetime
+import webbrowser
 
 from src.core.utils import logger, sanitize_filename, show_animation, print_progress
 from src.search.planned_topics import TopicPlanner
@@ -261,11 +262,11 @@ async def main():
             ranked_results_file = search_result_ranker.save_ranked_results_to_json(ranked_results, theme_name)
             
             # Шаг 7: Скрапинг содержимого топ-5 страниц
-            print_step(7, "Скрапинг содержимого топ-5 страниц")
-            print("Скрапинг содержимого только для 5 наиболее релевантных результатов...")
+            print_step(7, "Скрапинг содержимого топ-15 страниц")
+            print("Скрапинг содержимого только для 15 наиболее релевантных результатов...")
             
             # Выполняем скрапинг только для топ-5 отранжированных результатов
-            top_results_with_content = await scrape_top_ranked_results(ranked_results[:5], theme_name)
+            top_results_with_content = await scrape_top_ranked_results(ranked_results[:15], theme_name)
             
             if not top_results_with_content:
                 print("Не удалось получить содержимое страниц. Проверьте подключение к интернету и попробуйте снова.")
@@ -343,10 +344,13 @@ async def main():
             
             # Спрашиваем пользователя о дальнейших действиях
             print("\n" + "=" * 80)
-            print("\nСсылка на ответ: " + os.path.abspath(f"cache/{theme_name}/answer.html"))
+            print("\nСсылка на ответ: " + os.path.expanduser(f"~/mind-search/{theme_name}.html"))
             print("\n" + "=" * 80)
             input("\nНажмите Enter для продолжения...")
             
+            # открываем файл в браузере
+            webbrowser.open(os.path.expanduser(f"~/mind-search/{theme_name}.html"))
+
         except KeyboardInterrupt:
             print("\n\nРабота программы прервана пользователем.")
             break
